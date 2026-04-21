@@ -1,0 +1,121 @@
+Mind Map:
+https://miro.com/app/board/o9J_krrlWig=/
+
+## Matrix Constraint
+
+Matrix constraint should not use be used if:
+- Driven node is a joint
+- Driver or driven has a frozen transform
+- Rotate pivot of the driven has been changed
+- If there are multiple drivers the driver weights will be altered later
+
+
+# Sample Dev Script:
+#######################################################################[START]
+#######################################################################[START]
+#######################################################################[START]
+import sys
+import os
+
+# add the system path new trigger folder exclusively to prevent clashes
+# each new new trigger module uses trigger.<module> paths to acces modules
+
+trigger_path = "C:\\Users\\kutlu\\Documents\\maya\\scripts\\TRigger"
+
+if trigger_path not in sys.path:
+    sys.path.append(trigger_path)
+
+# load reload all modules
+
+# load reload all modules
+
+# Core
+from trigger.core import undo_dec
+reload(undo_dec)
+from trigger.core import feedback
+reload(feedback)
+from trigger.core import io
+reload(io)
+from trigger.core import settings
+reload(settings)
+
+# Base
+from trigger.base import initials
+reload(initials)
+from trigger.base import builder
+reload(builder)
+from trigger.base import session
+
+# Library
+from trigger.library import controllers
+reload(controllers)
+from trigger.library import functions
+reload(functions)
+from trigger.library import ribbon
+reload(ribbon)
+from trigger.library import tools
+reload(tools)
+from trigger.library import twist_spline
+reload(twist_spline)
+
+# Modules
+import trigger.modules.__init__
+reload(trigger.modules.__init__)
+
+from trigger import modules
+reload(modules)
+from trigger.modules import base
+reload(base)
+from trigger.modules import arm
+reload(arm)
+from trigger.modules import finger
+reload(finger)
+from trigger.modules import head
+reload(head)
+from trigger.modules import leg
+reload(leg)
+from trigger.modules import connector
+reload(connector)
+from trigger.modules import spine
+reload(spine)
+from trigger.modules import tail
+reload(tail)
+from trigger.modules import tentacle
+reload(tentacle)
+
+# Actions
+import trigger.actions.__init__
+reload(trigger.actions.__init__)
+from trigger.actions import cleaning
+reload(cleaning)
+from trigger.actions import kinematics
+reload(kinematics)
+from trigger.actions import master
+reload(master)
+from trigger.actions import weights
+reload(weights)
+
+# Utils
+from trigger.utils import mr_cubic
+reload(mr_cubic)
+from trigger.utils import space_switcher
+reload(space_switcher)
+
+# # old UI
+# from trigger.ui import start
+# reload(start)
+# start.MainUI().show()
+# new UI
+from trigger import modules
+reload(modules)
+from trigger.ui import main
+reload(main)
+main.MainUI() # show() runs inside the init
+
+
+
+#######################################################################[END]
+#######################################################################[END]
+#######################################################################[END]
+
+

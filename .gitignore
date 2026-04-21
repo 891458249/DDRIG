@@ -1,18 +1,10 @@
 # ============================================================
 # DDRIG .gitignore
-# Clean-Room independent work — excludes tooling & reference
 # ============================================================
 
 # === Workspace tooling (not part of DDRIG source) ===
 .claude/
 .remember/
-
-# === Reference-only original codebase ===
-# trigger-master/ is GPL-3.0 source by Arda Kutlu, kept solely
-# as a behavioral reference for Clean-Room specification (阶段 A).
-# Intentionally excluded from the DDRIG repository to preserve
-# independence of the new implementation.
-trigger-master/
 
 # === Python ===
 __pycache__/
@@ -65,3 +57,12 @@ incrementalSave/
 *.tmp
 *.bak
 *.orig
+
+# === Large third-party binaries (fetch separately if needed) ===
+python/trigger/tools/face_mocap/ffmpeg.exe
+python/trigger/utils/dembones/Linux/
+python/trigger/utils/dembones/MacOS/
+python/trigger/utils/dembones/Windows/
+
+# === Maya sample scenes and assets (kept external to repo) ===
+samples/
