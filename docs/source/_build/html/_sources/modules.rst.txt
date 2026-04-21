@@ -1,4 +1,0 @@
-.. _limbmodules:
-
-Limb Modules
-=======

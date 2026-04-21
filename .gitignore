@@ -66,3 +66,6 @@ python/trigger/utils/dembones/Windows/
 
 # === Maya sample scenes and assets (kept external to repo) ===
 samples/
+
+# === Sphinx generated documentation (regenerate via `sphinx-build` or `make html`) ===
+docs/source/_build/
