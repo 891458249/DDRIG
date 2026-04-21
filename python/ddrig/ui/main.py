@@ -662,12 +662,13 @@ class MainUI(QtWidgets.QMainWindow):
 
         ## SIGNALS
         self.guides_list_treeWidget.currentItemChanged.connect(self.on_guide_change)
-        self.module_name_le.textEdited.connect(
-            lambda text=self.module_name_le.text(): self.update_properties(
-                "moduleName", text
-            )
-        )
-        self.module_name_le.editingFinished.connect(self.populate_guides)
+        # Module Name commit-on-finish: textEdited is intentionally NOT wired,
+        # to avoid writing the attribute on every keystroke — which would
+        # both flood the undo stack and bake a half-typed name into
+        # .moduleName if the user then renames an upstream DAG node.
+        # Instead, on editingFinished (focus-out or Enter) we perform the
+        # full scene-side DAG rename via Initials.rename_module().
+        self.module_name_le.editingFinished.connect(self.on_module_name_finished)
 
         self.up_axis_sp_list[0].valueChanged.connect(
             lambda num: self.update_properties("upAxisX", num)
@@ -1389,6 +1390,56 @@ class MainUI(QtWidgets.QMainWindow):
             )
 
         parent_form_layout.addRow(p_lbl, p_widget)
+
+    def on_module_name_finished(self):
+        """QLineEdit editingFinished handler — commits the new module name
+        to both the .moduleName string attribute and every corresponding
+        DAG node via Initials.rename_module. Conflicts and invalid input
+        surface as QMessageBox.warning; the QLineEdit text is rolled back
+        to the current on-scene value on any error path."""
+        item = self.guides_list_treeWidget.currentItem()
+        if not item:
+            return
+        old_root_jnt = item.text(2)
+        new_input = self.module_name_le.text().strip()
+        if not new_input:
+            # Empty input: restore the displayed text from the scene; do nothing.
+            current_name = self.guides_handler.init.get_property(
+                old_root_jnt, "moduleName"
+            )
+            self.module_name_le.setText(current_name)
+            return
+        try:
+            result = self.guides_handler.init.rename_module(old_root_jnt, new_input)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Rename failed", str(exc))
+            current_name = self.guides_handler.init.get_property(
+                old_root_jnt, "moduleName"
+            )
+            self.module_name_le.setText(current_name)
+            return
+        # Success — rebuild the guides tree and reselect the renamed module.
+        self._refresh_guides_after_rename(result["new_root_jnt"])
+
+    def _refresh_guides_after_rename(self, new_root_jnt):
+        """Rebuild the Guides tree then explicitly re-select the item whose
+        text(2) matches the post-rename root joint short name.
+
+        populate_guides() reads the previously-selected root-joint name
+        from the current item's text(2) to restore selection — but after
+        rename that text is a stale name that no tree item will match, so
+        the selection is silently lost. We therefore let populate_guides
+        run with its default behaviour (selection drops) and then restore
+        selection here by the explicitly-supplied new name.
+        """
+        self.populate_guides()
+        for i in range(self.guides_list_treeWidget.topLevelItemCount()):
+            it = self.guides_list_treeWidget.topLevelItem(i)
+            if it.text(2) == new_root_jnt:
+                self.guides_list_treeWidget.setCurrentItem(it)
+                return
+        # Could not find the expected item — leave the tree as-is and let
+        # the user re-select manually; this is a soft failure, not a crash.
 
     def update_properties(self, property, value):
         root_jnt = self.guides_list_treeWidget.currentItem().text(2)
