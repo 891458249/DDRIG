@@ -1,11 +1,11 @@
-from trigger.ui.Qt import QtWidgets, QtCore, QtGui
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui import feedback
-from trigger.library.selection import validate
+from ddrig.ui.Qt import QtWidgets, QtCore, QtGui
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui import feedback
+from ddrig.library.selection import validate
 
 windowName = "AnchorMaker"
 
-from trigger.utils import space_switcher
+from ddrig.utils import space_switcher
 
 
 def launch():

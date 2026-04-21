@@ -21,7 +21,7 @@ from maya import mel
 import maya.OpenMaya as om
 import maya.OpenMayaAnim as oma
 
-from trigger.library import (
+from ddrig.library import (
     deformers,
     attribute,
     functions,
@@ -30,11 +30,11 @@ from trigger.library import (
     naming,
     transform,
 )
-from trigger.core.decorators import keepselection
-from trigger.library import connection
-from trigger.objects import skin
-from trigger.utils import skin_transfer
-from trigger.core import filelog
+from ddrig.core.decorators import keepselection
+from ddrig.library import connection
+from ddrig.objects import skin
+from ddrig.utils import skin_transfer
+from ddrig.core import filelog
 
 
 def get_std_deviation(value_list):
@@ -439,12 +439,12 @@ class Jointify(object):
         'blink': {
                 'connected': True,
                 'in': 'morph_hook.blink',
-                'out': 'trigger_morph_blendshape.blink',
+                'out': 'ddrig_morph_blendshape.blink',
                 'type': 'base'},
         'browLowerer': {
                 'connected': True,
                 'in': 'morph_hook.browLowerer',
-                'out': 'trigger_morph_blendshape.browLowerer',
+                'out': 'ddrig_morph_blendshape.browLowerer',
                 'type': 'base'}
         }
 

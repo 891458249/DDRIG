@@ -1,10 +1,10 @@
 """Module to ease the arithmetic operations"""
 
 from maya import cmds
-from trigger.core import compatibility as compat
-from trigger.core import filelog
+from ddrig.core import compatibility as compat
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 def add(a=None, b=None, value_list=None, return_plug=True, name="add"):

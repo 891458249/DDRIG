@@ -1,8 +1,8 @@
 from maya import cmds
 from importlib import reload
-from trigger.base import initials
-from trigger.modules import base
-from trigger.modules import singleton
+from ddrig.base import initials
+from ddrig.modules import base
+from ddrig.modules import singleton
 reload(singleton)
 
 cmds.file(new=True, force=True)

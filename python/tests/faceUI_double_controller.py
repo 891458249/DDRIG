@@ -1,9 +1,9 @@
 # Example script for creating double blendshape face ui controls
 
 from maya import cmds
-from trigger.library import icons
-from trigger.library import functions
-from trigger.library import attribute
+from ddrig.library import icons
+from ddrig.library import functions
+from ddrig.library import attribute
 
 iconHandler = controllers.Icon()
 

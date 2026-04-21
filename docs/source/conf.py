@@ -4,16 +4,16 @@ import os
 import sys
 
 # Add the path to the tik_manager4 folder to sys.path
-sys.path.insert(0, os.path.abspath('../../python/trigger/'))
+sys.path.insert(0, os.path.abspath('../../python/ddrig/'))
 
 # Import the version from _version.py
 from _version import __version__
 
 # -- Project information
 
-project = 'Trigger'
-copyright = '2023, Arda Kutlu'
-author = 'Arda Kutlu'
+project = 'DDRIG'
+copyright = '2023, Drafter'
+author = 'Drafter'
 
 # Automatically populate version and release from _version.py
 version = __version__  # Short X.Y version
@@ -35,7 +35,7 @@ extensions = [
     'autoapi.extension',
 ]
 
-autoapi_dirs = ['../../python/trigger/']
+autoapi_dirs = ['../../python/ddrig/']
 autoapi_type = 'python'
 autoapi_ignore = ['*setup*', '*shiboken*', '*PySide2*', '*PySide6*', '*PyQt5*', '*PyQt6*']
 autoapi_file_patterns = ['*.py']

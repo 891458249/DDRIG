@@ -1,1 +1,1 @@
-+ trigger 0.0.1 shelves_module
++ ddrig 0.0.1 shelves_module

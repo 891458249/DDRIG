@@ -1,5 +1,5 @@
 .. _face_cam:
-.. |face_cam| image:: ../../../python/trigger/ui/icons/face_cam.png
+.. |face_cam| image:: ../../../python/ddrig/ui/icons/face_cam.png
 
 =========================
 Face Cam |face_cam|

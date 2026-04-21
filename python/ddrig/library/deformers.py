@@ -1,14 +1,14 @@
 """Collection of deformer related functions"""
 
 from maya import cmds
-from trigger.core.decorators import undo, keepselection
-from trigger.library import functions, transform, attribute
-from trigger.library import naming
-from trigger.core import compatibility as compat
+from ddrig.core.decorators import undo, keepselection
+from ddrig.library import functions, transform, attribute
+from ddrig.library import naming
+from ddrig.core import compatibility as compat
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 def get_deformers(mesh=None, names_only=False):
@@ -94,7 +94,7 @@ def connect_bs_targets(
                         name exists, it will use that one.
     """
     if not bs_node_name:
-        bs_node_name = naming.unique_name("trigger_blendShape")
+        bs_node_name = naming.unique_name("ddrig_blendShape")
     if driver_range:
         custom_range = True
     else:

@@ -4,14 +4,14 @@
 
 from maya import cmds
 
-from trigger.core import filelog
-from trigger.core.decorators import keepselection
+from ddrig.core import filelog
+from ddrig.core.decorators import keepselection
 
-from trigger.library import functions, attribute
-from trigger.library.icons import Icon
-from trigger.library.tools import replace_curve
+from ddrig.library import functions, attribute
+from ddrig.library.icons import Icon
+from ddrig.library.tools import replace_curve
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Controller(object):

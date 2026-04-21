@@ -1,37 +1,37 @@
 from importlib import reload
-from trigger.library import functions
+from ddrig.library import functions
 reload(functions)
-from trigger.core import io
+from ddrig.core import io
 reload(io)
-from trigger.core import settings
+from ddrig.core import settings
 reload(settings)
-from trigger.ui import main
+from ddrig.ui import main
 reload(main)
-from trigger.base import initials
+from ddrig.base import initials
 reload(initials)
-from trigger.modules import arm
+from ddrig.modules import arm
 reload(arm)
-from trigger.modules import spine
+from ddrig.modules import spine
 reload(spine)
-from trigger.modules import head
+from ddrig.modules import head
 reload(head)
 
 #a = main.MainUI().show()
 
-from trigger.actions import kinematics
+from ddrig.actions import kinematics
 reload(kinematics)
-from trigger.modules import surface
+from ddrig.modules import surface
 reload(surface)
-from trigger.modules import tentacle
+from ddrig.modules import tentacle
 reload(tentacle)
 tentacle_handler = kinematics.Kinematics(root_joint="jInit_tentacle_center_0")
 tentacle_handler.action()
 surface_handler = kinematics.Kinematics(root_joint="surface_center")
 surface_handler.action()
 
-functions.delete_object("trigger_refGuides")
+functions.delete_object("ddrig_refGuides")
 
-from trigger.actions import weights
+from ddrig.actions import weights
 reload(weights)
 weight_handler = weights.Weights()
 

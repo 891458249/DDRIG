@@ -1,27 +1,27 @@
 """Builds the kinematics starting from the given root and for all descendants"""
 import os
 from maya import cmds
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.core import database
-from trigger.core.decorators import suppress_warnings
-from trigger.core.compatibility import is_string
-from trigger.library import functions, naming, joint
-from trigger.library import attribute
-from trigger.library import api
+from ddrig.core import database
+from ddrig.core.decorators import suppress_warnings
+from ddrig.core.compatibility import is_string
+from ddrig.library import functions, naming, joint
+from ddrig.library import attribute
+from ddrig.library import api
 
-from trigger.base import session
+from ddrig.base import session
 
-from trigger import modules
-import trigger.utils.space_switcher as anchor_maker
+from ddrig import modules
+import ddrig.utils.space_switcher as anchor_maker
 
-from trigger.actions import master
+from ddrig.actions import master
 
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 db = database.Database()
 #
 ACTION_DATA = {
@@ -72,7 +72,7 @@ class Kinematics(ActionCore):
         self.limbCreationList = []
         self.rootGroup = None
 
-        self.rig_name = rig_name if rig_name else "trigger"
+        self.rig_name = rig_name if rig_name else "ddrig"
 
     def feed(self, action_data):
         """Mandatory Function for builder- feeds with the Action Data from builder"""
@@ -86,7 +86,7 @@ class Kinematics(ActionCore):
         self.multi_selectionSets = action_data.get("multi_selectionSets", False)
 
     def action(self):
-        root_grp = "trigger_grp"
+        root_grp = "ddrig_grp"
         if self.guides_file_path:
             guides_handler = session.Session()
             guides_handler.load_session(self.guides_file_path)
@@ -131,7 +131,7 @@ class Kinematics(ActionCore):
         browse_path_pb = BrowserButton(
             update_widget=file_path_le,
             mode="openFile",
-            filterExtensions=["Trigger Guide Files (*.trg)"],
+            filterExtensions=["DDRIG Guide Files (*.trg)"],
         )
         file_path_h_lay.addWidget(browse_path_pb)
         layout.addRow(file_path_lbl, file_path_h_lay)
@@ -495,8 +495,8 @@ class Kinematics(ActionCore):
                     daisyChain=True,
                     overrideEx=False,
                 )
-                if functions.get_parent(limb.limbGrp) != "trigger_grp":
-                    cmds.parent(limb.limbGrp, "trigger_grp")
+                if functions.get_parent(limb.limbGrp) != "ddrig_grp":
+                    cmds.parent(limb.limbGrp, "ddrig_grp")
                 for s_con in limb.scaleConstraints:
                     # if this is the root limb, use its values to scale the entire rig
                     if x == limb_creation_list[0]:

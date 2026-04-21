@@ -1,11 +1,11 @@
 .. _script:
-.. |script| image:: ../../../python/trigger/ui/icons/script.png
+.. |script| image:: ../../../python/ddrig/ui/icons/script.png
 
 =====================================
 Script |script|
 =====================================
 
-Script action is for running custom python scripts and commands inside Trigger context.
+Script action is for running custom python scripts and commands inside DDRIG context.
 
 The modules imported and variables defined (even the global
 ones) are not accessible other than the individual action module itself.
@@ -18,4 +18,4 @@ ones) are not accessible other than the individual action module itself.
 .. tip:: 
     simple commands may not require a file path defined. Cmds module can be imported and the command can run in commands section without 
     the need of any external file like this::
-    from maya import cmds; cmds.delete("trigger_refGuides")
+    from maya import cmds; cmds.delete("ddrig_refGuides")

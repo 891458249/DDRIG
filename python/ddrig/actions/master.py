@@ -2,11 +2,11 @@
 
 from maya import cmds
 
-from trigger.library import functions
-from trigger.core.action import ActionCore
+from ddrig.library import functions
+from ddrig.core.action import ActionCore
 
-from trigger.library import attribute
-from trigger.library import icons as ic
+from ddrig.library import attribute
+from ddrig.library import icons as ic
 
 ACTION_DATA = {}
 
@@ -21,19 +21,19 @@ class Master(ActionCore):
         """Mandatory method for all action maya_modules"""
         pref_name = "pref_cont"
         master_rig_grp = "rig_grp"
-        trigger_rig_grp = "trigger_grp"
+        ddrig_rig_grp = "ddrig_grp"
         render_geo_grp = "renderGeo_grp"
-        for grp in [master_rig_grp, trigger_rig_grp, render_geo_grp]:
+        for grp in [master_rig_grp, ddrig_rig_grp, render_geo_grp]:
             if not cmds.objExists(grp):
                 cmds.group(name=grp, em=True)
-        if functions.get_parent(trigger_rig_grp) != master_rig_grp:
-            cmds.parent(trigger_rig_grp, master_rig_grp)
+        if functions.get_parent(ddrig_rig_grp) != master_rig_grp:
+            cmds.parent(ddrig_rig_grp, master_rig_grp)
         if functions.get_parent(render_geo_grp) != master_rig_grp:
             cmds.parent(render_geo_grp, master_rig_grp)
         if not cmds.objExists(pref_name):
             icon = ic.Icon()
             preferences_cont = icon.create_icon("Preferences", pref_name)
-            cmds.parent(preferences_cont, trigger_rig_grp)
+            cmds.parent(preferences_cont, ddrig_rig_grp)
         # create attributes
         attributes = [
             {

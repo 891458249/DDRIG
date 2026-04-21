@@ -2,7 +2,7 @@ import os
 import glob
 import importlib
 import inspect
-from trigger.core.module import ModuleCore, GuidesCore
+from ddrig.core.module import ModuleCore, GuidesCore
 
 def get_module_classes(module):
     _data = {}
@@ -40,4 +40,4 @@ for mod in modules:
 # ]
 #
 # for mod in __all__:
-#     importlib.import_module("trigger.modules.%s" % mod)
+#     importlib.import_module("ddrig.modules.%s" % mod)

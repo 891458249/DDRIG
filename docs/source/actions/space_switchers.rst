@@ -1,5 +1,5 @@
 .. _space_switchers:
-.. |space_switchers| image:: ../../../python/trigger/ui/icons/space_switchers.png
+.. |space_switchers| image:: ../../../python/ddrig/ui/icons/space_switchers.png
 
 =====================================
 Space Switchers |space_switchers|

@@ -1,33 +1,33 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""Main UI for trigger"""
+"""Main UI for ddrig"""
 import sys, os
 from maya import cmds
 
-from trigger.core import database
+from ddrig.core import database
 
-import trigger.utils.mocap.ui as mocap_ui
+import ddrig.utils.mocap.ui as mocap_ui
 
-from trigger.ui.Qt import QtWidgets, QtCore, QtGui
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui import model_ctrl
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets, QtCore, QtGui
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui import model_ctrl
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
-from trigger.base import session
-from trigger.base import actions_session
+from ddrig.base import session
+from ddrig.base import actions_session
 
-from trigger.library import naming
+from ddrig.library import naming
 
-from trigger.core import filelog
-import trigger._version as version
-from trigger import version_control
+from ddrig.core import filelog
+import ddrig._version as version
+from ddrig import version_control
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 db = database.Database()
 
-WINDOW_NAME = "Trigger {0}".format(version.__version__)
+WINDOW_NAME = "DDRIG {0}".format(version.__version__)
 
 qss = """
 QPushButton
@@ -92,7 +92,7 @@ def _kill_callbacks(callback_id_list):
 
 
 def launch(force=False, disable_version_control=False):
-    """Launch the Trigger UI"""
+    """Launch the DDRIG UI"""
     for entry in QtWidgets.QApplication.allWidgets():
         try:
             if entry.objectName() == WINDOW_NAME:
@@ -101,7 +101,7 @@ def launch(force=False, disable_version_control=False):
                     entry.deleteLater()
                 else:
                     log.warning(
-                        "Only one session of Trigger can be opened per Maya instance"
+                        "Only one session of DDRIG can be opened per Maya instance"
                     )
                     return
         except (AttributeError, TypeError):
@@ -190,7 +190,7 @@ class MainUI(QtWidgets.QMainWindow):
             self.force_update, parent=None, event="SelectionChanged"
         )
 
-        # force open the trigger session on initialization if a session found
+        # force open the ddrig session on initialization if a session found
         # if self.asset_selection_w and not disable_version_controller:
         #     self.asset_selection_w.set_version()
         # else:
@@ -243,12 +243,12 @@ class MainUI(QtWidgets.QMainWindow):
         if self.actions_handler.is_modified():
             r = self.feedback.pop_question(
                 title="Scene not saved",
-                text="Current Trigger session is not saved\n "
+                text="Current DDRIG session is not saved\n "
                 "Do you want to save before quit?",
                 buttons=["yes", "no", "cancel"],
             )
             if r == "yes":
-                self.save_trigger()
+                self.save_ddrig()
                 _kill_callbacks(self.callbackIDList)
                 event.accept()
             elif r == "no":
@@ -268,13 +268,13 @@ class MainUI(QtWidgets.QMainWindow):
         self.menu_file = QtWidgets.QMenu(menubar)
         self.menu_file.setTitle("File")
 
-        new_trigger_action = QtWidgets.QAction(self, text="New Trigger Session")
-        open_trigger_action = QtWidgets.QAction(self, text="Open Trigger Session")
-        import_trigger_action = QtWidgets.QAction(self, text="Import Trigger Session")
-        save_trigger_action = QtWidgets.QAction(self, text="Save Trigger Session")
-        save_as_trigger_action = QtWidgets.QAction(self, text="Save As Trigger Session")
-        increment_trigger_action = QtWidgets.QAction(
-            self, text="Increment Save Trigger Session"
+        new_ddrig_action = QtWidgets.QAction(self, text="New DDRIG Session")
+        open_ddrig_action = QtWidgets.QAction(self, text="Open DDRIG Session")
+        import_ddrig_action = QtWidgets.QAction(self, text="Import DDRIG Session")
+        save_ddrig_action = QtWidgets.QAction(self, text="Save DDRIG Session")
+        save_as_ddrig_action = QtWidgets.QAction(self, text="Save As DDRIG Session")
+        increment_ddrig_action = QtWidgets.QAction(
+            self, text="Increment Save DDRIG Session"
         )
         import_guides_action = QtWidgets.QAction(self, text="Import Guides")
         export_guides_action = QtWidgets.QAction(self, text="Export Guides")
@@ -282,13 +282,13 @@ class MainUI(QtWidgets.QMainWindow):
         reset_scene_action = QtWidgets.QAction(self, text="Reset Scene")
         exit_action = QtWidgets.QAction(self, text="Exit")
 
-        self.menu_file.addAction(new_trigger_action)
-        self.menu_file.addAction(open_trigger_action)
-        self.menu_file.addAction(import_trigger_action)
+        self.menu_file.addAction(new_ddrig_action)
+        self.menu_file.addAction(open_ddrig_action)
+        self.menu_file.addAction(import_ddrig_action)
         self.menu_file.addSeparator()
-        self.menu_file.addAction(save_trigger_action)
-        self.menu_file.addAction(save_as_trigger_action)
-        self.menu_file.addAction(increment_trigger_action)
+        self.menu_file.addAction(save_ddrig_action)
+        self.menu_file.addAction(save_as_ddrig_action)
+        self.menu_file.addAction(increment_ddrig_action)
         self.menu_file.addSeparator()
         self.menu_file.addAction(import_guides_action)
         self.menu_file.addAction(export_guides_action)
@@ -325,12 +325,12 @@ class MainUI(QtWidgets.QMainWindow):
 
         # SIGNALS
         # menu items
-        new_trigger_action.triggered.connect(self.new_trigger)
-        open_trigger_action.triggered.connect(self.open_trigger)
-        import_trigger_action.triggered.connect(self.import_trigger)
-        save_trigger_action.triggered.connect(self.save_trigger)
-        save_as_trigger_action.triggered.connect(self.save_as_trigger)
-        increment_trigger_action.triggered.connect(self.increment_trigger)
+        new_ddrig_action.triggered.connect(self.new_ddrig)
+        open_ddrig_action.triggered.connect(self.open_ddrig)
+        import_ddrig_action.triggered.connect(self.import_ddrig)
+        save_ddrig_action.triggered.connect(self.save_ddrig)
+        save_as_ddrig_action.triggered.connect(self.save_as_ddrig)
+        increment_ddrig_action.triggered.connect(self.increment_ddrig)
 
         export_guides_action.triggered.connect(self.export_guides)
         import_guides_action.triggered.connect(self.import_guides)
@@ -872,7 +872,7 @@ class MainUI(QtWidgets.QMainWindow):
             recent_action = QtWidgets.QAction(self.menu_file, text=recent)
             self.recents_menu.addAction(recent_action)
             recent_action.triggered.connect(
-                lambda _=0, x=recent: self.open_trigger(file_path=x)
+                lambda _=0, x=recent: self.open_ddrig(file_path=x)
             )
 
     def on_action_info(self):
@@ -970,7 +970,7 @@ class MainUI(QtWidgets.QMainWindow):
         if self.vcs:
             self.vcs.publish()
 
-    def new_trigger(self):
+    def new_ddrig(self):
         if not self._validate_unsaved_work():
             return False
 
@@ -991,7 +991,7 @@ class MainUI(QtWidgets.QMainWindow):
                 buttons=["yes", "no", "cancel"],
             )
             if state == "yes":
-                self.save_trigger()
+                self.save_ddrig()
                 return True
             elif state == "no":
                 return True
@@ -1000,16 +1000,16 @@ class MainUI(QtWidgets.QMainWindow):
         else:
             return True
 
-    def open_trigger(self, file_path=None, force=False):
+    def open_ddrig(self, file_path=None, force=False):
         if not force and not self._validate_unsaved_work():
             return False
 
         if not file_path:
             dlg = QtWidgets.QFileDialog.getOpenFileName(
                 self,
-                str("Open Trigger Session"),
+                str("Open DDRIG Session"),
                 self.actions_handler.session_path,
-                str("Trigger Session (*.tr)"),
+                str("DDRIG Session (*.tr)"),
             )
             if dlg[0]:
                 file_path = os.path.normpath(dlg[0])
@@ -1023,16 +1023,16 @@ class MainUI(QtWidgets.QMainWindow):
         self.populate_recents()
         return True
 
-    def import_trigger(self, file_path=None):
+    def import_ddrig(self, file_path=None):
         row = self.rig_actions_listwidget.currentRow()
         index = None if row == -1 else row + 1
 
         if not file_path:
             dlg = QtWidgets.QFileDialog.getOpenFileName(
                 self,
-                str("Open Trigger Session"),
+                str("Open DDRIG Session"),
                 self.actions_handler.session_path,
-                str("Trigger Session (*.tr)"),
+                str("DDRIG Session (*.tr)"),
             )
             if dlg[0]:
                 file_path = os.path.normpath(dlg[0])
@@ -1042,7 +1042,7 @@ class MainUI(QtWidgets.QMainWindow):
         self.actions_handler.import_session(file_path, insert_index=index)
         self.populate_actions()
 
-    def increment_trigger(self):
+    def increment_ddrig(self):
         if self.actions_handler.session_path:
             new_file = naming.increment(self.actions_handler.session_path)
             self.actions_handler.save_session(new_file)
@@ -1055,16 +1055,16 @@ class MainUI(QtWidgets.QMainWindow):
         else:
             self.feedback.pop_info(
                 title="Cannot Complete",
-                text="Trigger Session needs to be saved first to increment it\nAborting...",
+                text="DDRIG Session needs to be saved first to increment it\nAborting...",
                 critical=True,
             )
 
-    def save_as_trigger(self):
+    def save_as_ddrig(self):
         dlg = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            str("Save Trigger Session"),
+            str("Save DDRIG Session"),
             self.actions_handler.session_path,
-            str("Trigger Session (*.tr)"),
+            str("DDRIG Session (*.tr)"),
         )
         if dlg[0]:
             self.actions_handler.save_session(os.path.normpath(dlg[0]))
@@ -1075,7 +1075,7 @@ class MainUI(QtWidgets.QMainWindow):
                 "Saved %s" % self.actions_handler.session_path, 5000
             )
 
-    def save_trigger(self):
+    def save_ddrig(self):
         if self.actions_handler.session_path:
             self.actions_handler.save_session(self.actions_handler.session_path)
             db.recentSessions.add(self.actions_handler.session_path)
@@ -1085,7 +1085,7 @@ class MainUI(QtWidgets.QMainWindow):
                 "Saved %s" % self.actions_handler.session_path, 5000
             )
         else:
-            self.save_as_trigger()
+            self.save_as_ddrig()
 
     def vcs_save_session(self, path):
         """Creates and saves a new session using the path coming from version control.
@@ -1211,7 +1211,7 @@ class MainUI(QtWidgets.QMainWindow):
 
     def import_guides(self):
         dlg = QtWidgets.QFileDialog.getOpenFileName(
-            self, str("Import Guides"), "", str("Trigger Guides (*.trg)")
+            self, str("Import Guides"), "", str("DDRIG Guides (*.trg)")
         )
         if dlg[0]:
             self.guides_handler.load_session(
@@ -1221,7 +1221,7 @@ class MainUI(QtWidgets.QMainWindow):
 
     def export_guides(self):
         dlg = QtWidgets.QFileDialog.getSaveFileName(
-            self, str("Export Guides"), "", str("Trigger Guides (*.trg)")
+            self, str("Export Guides"), "", str("DDRIG Guides (*.trg)")
         )
         if dlg[0]:
             self.guides_handler.save_session(os.path.normpath(dlg[0]))
@@ -1427,19 +1427,19 @@ class MainUI(QtWidgets.QMainWindow):
     # Tools menu methods
     @staticmethod
     def on_makeup():
-        from trigger.utils import makeup
+        from ddrig.utils import makeup
 
         makeup.launch()
 
     @staticmethod
     def on_mocap_mapper():
-        import trigger.utils.mocap.ui as mocap_ui
+        import ddrig.utils.mocap.ui as mocap_ui
 
         mocap_ui.launch()
 
     @staticmethod
     def on_rom_randomizer():
-        import trigger.utils.rom_randomizer.ui as rom_randomizer_ui
+        import ddrig.utils.rom_randomizer.ui as rom_randomizer_ui
 
         rom_randomizer_ui.launch()
 
@@ -1498,5 +1498,5 @@ class MainUI(QtWidgets.QMainWindow):
         ret = self.progress_Dialog.show()
 
     def get_version(self):
-        """Return trigger version."""
+        """Return ddrig version."""
         return version.__version__

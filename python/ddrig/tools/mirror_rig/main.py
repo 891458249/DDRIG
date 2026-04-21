@@ -1,10 +1,10 @@
 """Main class for mirror rigging."""
 
 from maya import cmds
-from trigger.objects import controller
-from trigger.objects.scene_data import SceneDictionary
-from trigger.library import attribute
-from trigger.library import naming
+from ddrig.objects import controller
+from ddrig.objects.scene_data import SceneDictionary
+from ddrig.library import attribute
+from ddrig.library import naming
 
 import logging
 

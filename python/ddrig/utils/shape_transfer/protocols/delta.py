@@ -1,7 +1,7 @@
 """Delta Transfer Protocol."""
 
 from maya import cmds
-from trigger.utils.shape_transfer.protocol_core import ProtocolCore
+from ddrig.utils.shape_transfer.protocol_core import ProtocolCore
 
 
 class DeltaTransfer(ProtocolCore):

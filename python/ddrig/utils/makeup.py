@@ -1,21 +1,21 @@
 from maya import cmds
 
-# from trigger.ui.Qt import QtWidgets
+# from ddrig.ui.Qt import QtWidgets
 # from PySide2 import QtWidgets, QtCore
-from trigger.ui.Qt import QtWidgets
-from trigger.core.decorators import keepselection, undo
-from trigger.library.icons import Icon
-from trigger.library.tools import replace_curve, mirror_controller
+from ddrig.ui.Qt import QtWidgets
+from ddrig.core.decorators import keepselection, undo
+from ddrig.library.icons import Icon
+from ddrig.library.tools import replace_curve, mirror_controller
 
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui.feedback import Feedback
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui.feedback import Feedback
 
 
-WINDOW_NAME = "Trigger Make-up v0.0.2"
+WINDOW_NAME = "DDRIG Make-up v0.0.2"
 
 
 class Makeup(object):
-    """Visualization aimed tools for trigger"""
+    """Visualization aimed tools for ddrig"""
 
     side_items = (
         "Auto Side",

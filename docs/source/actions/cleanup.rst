@@ -1,5 +1,5 @@
 .. _cleanup:
-.. |cleanup| image:: ../../../python/trigger/ui/icons/cleanup.png
+.. |cleanup| image:: ../../../python/ddrig/ui/icons/cleanup.png
 
 =================
 Cleanup |cleanup|

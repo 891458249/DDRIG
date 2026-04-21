@@ -4,14 +4,14 @@ from copy import deepcopy
 
 from maya import cmds
 import itertools
-from trigger.core import filelog
-from trigger.core.decorators import keepselection
-from trigger.actions import weights
-from trigger.library import functions
-from trigger.library import deformers
+from ddrig.core import filelog
+from ddrig.core.decorators import keepselection
+from ddrig.actions import weights
+from ddrig.library import functions
+from ddrig.library import deformers
 
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Splitter(dict):

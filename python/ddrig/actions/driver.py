@@ -2,18 +2,18 @@
 
 import fnmatch
 from maya import cmds
-from trigger.library import attribute
-from trigger.library import selection
+from ddrig.library import attribute
+from ddrig.library import selection
 
-from trigger.ui import feedback
+from ddrig.ui import feedback
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.ui import custom_widgets
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui import custom_widgets
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
 
-FILELOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+FILELOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {"mapping_data": [], "proxy_controller": ""}

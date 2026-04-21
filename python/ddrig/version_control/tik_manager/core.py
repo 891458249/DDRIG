@@ -10,7 +10,7 @@ import tik_manager4._version as version
 
 from tik_manager4.ui import main
 
-from trigger.version_control.api import ApiHandler
+from ddrig.version_control.api import ApiHandler
 
 
 @dataclasses.dataclass
@@ -23,11 +23,11 @@ class DisplayWidgets:
 class VCS(object):
     """Tik Manager4 version control integrator."""
 
-    def __init__(self, trigger_main_window):
+    def __init__(self, ddrig_main_window):
         """Initialize."""
-        # self._trigger_main_window = trigger_main_window
-        self.trigger_main_window = trigger_main_window
-        # self.tik = tik_manager4.initialize("trigger")
+        # self._ddrig_main_window = ddrig_main_window
+        self.ddrig_main_window = ddrig_main_window
+        # self.tik = tik_manager4.initialize("ddrig")
 
         self.display_widgets = DisplayWidgets(
             resolved_text=ResolvedText(
@@ -36,12 +36,12 @@ class VCS(object):
         )
 
         self.api_handler = ApiHandler()
-        self.api_handler.set_trigger_handler(trigger_main_window)
+        self.api_handler.set_ddrig_handler(ddrig_main_window)
 
     def build_session_header(self, layout):
         """Build the session header."""
         # add all display widgets to the layout
-        tik = tik_manager4.initialize("trigger")
+        tik = tik_manager4.initialize("ddrig")
         project_setter = project_mcv.TikProjectLayout(tik)
         layout.addLayout(project_setter)
         buttons_lay = QtWidgets.QHBoxLayout()
@@ -76,9 +76,9 @@ class VCS(object):
 
     def update_info(self):
         """Update the info on UI."""
-        tik = tik_manager4.initialize("trigger")
+        tik = tik_manager4.initialize("ddrig")
         work_obj, version = tik.project.get_current_work()
-        # current_scene_path = self.tik_trigger_handler.get_scene_file()
+        # current_scene_path = self.tik_ddrig_handler.get_scene_file()
 
         if work_obj:
             self.display_widgets.resolved_text.set_text(
@@ -93,7 +93,7 @@ class VCS(object):
 
     def launch_main_ui(self):
         """Launch the main UI."""
-        window_name = f"Tik Manager {version.__version__} - trigger"
+        window_name = f"Tik Manager {version.__version__} - ddrig"
         all_widgets = QtWidgets.QApplication.allWidgets()
         for entry in all_widgets:
             try:
@@ -102,9 +102,9 @@ class VCS(object):
                     entry.deleteLater()
             except (AttributeError, TypeError):
                 pass
-        tik = tik_manager4.initialize("trigger")
+        tik = tik_manager4.initialize("ddrig")
         ui = main.MainUI(
-            tik, parent=self.trigger_main_window, window_name=window_name
+            tik, parent=self.ddrig_main_window, window_name=window_name
         )
         ui.show()
         self.update_info()
@@ -113,14 +113,14 @@ class VCS(object):
     def save_new_version(self):
         """Save new version."""
         # we need to reinitialize the tik object because it may get overridden by maya tik object
-        tik = tik_manager4.initialize("trigger")
-        ui = main.MainUI(tik, parent=self.trigger_main_window)
+        tik = tik_manager4.initialize("ddrig")
+        ui = main.MainUI(tik, parent=self.ddrig_main_window)
         ui.on_new_version()
         self.update_info()
 
     def publish(self):
         """Publish the current version."""
-        tik = tik_manager4.initialize("trigger")
-        ui = main.MainUI(tik, parent=self.trigger_main_window)
+        tik = tik_manager4.initialize("ddrig")
+        ui = main.MainUI(tik, parent=self.ddrig_main_window)
         ui.on_publish_scene()
         self.update_info()

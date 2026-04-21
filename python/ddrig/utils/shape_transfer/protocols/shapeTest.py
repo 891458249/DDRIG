@@ -1,7 +1,7 @@
 """Delta Transfer Protocol."""
 
 from maya import cmds
-from trigger.utils.shape_transfer.protocol_core import ProtocolCore, Property
+from ddrig.utils.shape_transfer.protocol_core import ProtocolCore, Property
 class ShapeTest(ProtocolCore):
     name = "shapeTest"
     display_name = "Shape Test"

@@ -4,18 +4,18 @@ import os
 from maya import cmds
 from maya import mel
 
-from trigger.library import attribute
+from ddrig.library import attribute
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-from trigger import version_control
-from trigger.ui.vcs_widgets.publish_selection import PublishSelection
+from ddrig import version_control
+from ddrig.ui.vcs_widgets.publish_selection import PublishSelection
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "import_file_path": "",
@@ -251,7 +251,7 @@ class Import_asset(ActionCore):
             # _ = [attribute.unlock(node, attr_list=["sx", "sy", "sz"]) for node in new_nodes]
             # scale it (them) and add the suffix
             for node in root_nodes:
-                temp_grp = cmds.group(name="trigger_temp_grp", em=True)
+                temp_grp = cmds.group(name="ddrig_temp_grp", em=True)
                 cmds.parent(node, temp_grp)
                 cmds.xform(
                     temp_grp, s=(scale, scale, scale), piv=(0, 0, 0), ztp=True, p=True

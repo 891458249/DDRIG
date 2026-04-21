@@ -1,9 +1,9 @@
 """Boiler Plate template for actions"""
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {

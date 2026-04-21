@@ -3,7 +3,7 @@
 Sample usage:
 
 from importlib import reload
-from trigger.utils.rom_randomizer import rom_randomizer
+from ddrig.utils.rom_randomizer import rom_randomizer
 
 collector = rom_randomizer.Collector()
 collector.add_morph_controllers("morph_hook")
@@ -25,7 +25,7 @@ from maya import cmds
 import logging
 import time
 
-from trigger.library import attribute
+from ddrig.library import attribute
 
 __version__ = "1.0.1"
 LOG = logging.getLogger(__name__)
@@ -453,7 +453,7 @@ class AttributeItem(object):
                 self.attribute_path, query=True, defaultValue=True
             )
         else:
-            # try to get it from the custom trigger attributes.
+            # try to get it from the custom ddrig attributes.
             default_attr = "default{0}".format(self.attribute)
             if cmds.attributeQuery(default_attr, node=self.controller, exists=True):
                 default_value = cmds.getAttr(

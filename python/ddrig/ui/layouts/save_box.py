@@ -1,7 +1,7 @@
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui.widgets.browser import BrowserButton
-from trigger.library import naming
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.widgets.browser import BrowserButton
+from ddrig.library import naming
+from ddrig.ui import feedback
 
 
 class SaveBoxLayout(QtWidgets.QVBoxLayout):
@@ -57,7 +57,7 @@ class SaveBoxLayout(QtWidgets.QVBoxLayout):
         )
         self.storeButton = QtWidgets.QPushButton(text="Store")
         self.storeButton.setToolTip(
-            "Saves the file in the correct folder under the trigger file"
+            "Saves the file in the correct folder under the ddrig file"
         )
         self.incrementButton = QtWidgets.QPushButton(text="Increment")
         self.masterLayout.addWidget(self.saveButton)

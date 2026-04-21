@@ -1,13 +1,13 @@
 from maya import cmds
 import maya.api.OpenMaya as om
 
-from trigger.library import functions, naming, joint
-from trigger.objects.controller import Controller
-from trigger.core.module import ModuleCore, GuidesCore
+from ddrig.library import functions, naming, joint
+from ddrig.objects.controller import Controller
+from ddrig.core.module import ModuleCore, GuidesCore
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": ["Root"],

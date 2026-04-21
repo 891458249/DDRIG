@@ -2,23 +2,23 @@ import os
 from copy import deepcopy
 from maya import cmds
 
-from trigger.core import io
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import io
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.core.decorators import keepselection
-from trigger.library import functions
-from trigger.library import naming
-from trigger.library import deformers
+from ddrig.core.decorators import keepselection
+from ddrig.library import functions
+from ddrig.library import naming
+from ddrig.library import deformers
 
-from trigger.objects import skin
+from ddrig.objects import skin
 
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
-from trigger.ui import custom_widgets
-from trigger.ui.layouts.save_box import SaveBoxLayout
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui import custom_widgets
+from ddrig.ui.layouts.save_box import SaveBoxLayout
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {"create_deformers": True, "deformers": [], "weights_file_path": ""}
 
@@ -221,7 +221,7 @@ Then you can save and increment versions for all of them at once.
         browse_path_pb = BrowserButton(
             mode="openFile",
             update_widget=file_path_le,
-            filterExtensions=["Trigger Weight Files (*.trw)"],
+            filterExtensions=["DDRIG Weight Files (*.trw)"],
             overwrite_check=False,
         )
         file_path_hLay.addWidget(browse_path_pb)
@@ -242,7 +242,7 @@ Then you can save and increment versions for all of them at once.
         savebox_lay = SaveBoxLayout(
             alignment="horizontal",
             update_widget=file_path_le,
-            filter_extensions=["Trigger Weight Files (*.trw)"],
+            filter_extensions=["DDRIG Weight Files (*.trw)"],
             overwrite_check=True,
             control_model=ctrl,
         )

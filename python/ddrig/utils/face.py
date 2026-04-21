@@ -1,7 +1,7 @@
 """Collection of face utils that are not complex enough to be an action or not yet implemented as action"""
 
 from maya import cmds
-from trigger.library import (
+from ddrig.library import (
     functions,
     attribute,
     deformers,
@@ -10,7 +10,7 @@ from trigger.library import (
     arithmetic,
     naming,
 )
-from trigger.core.decorators import undo
+from ddrig.core.decorators import undo
 
 
 @undo
@@ -191,7 +191,7 @@ def lip_zipper(
     lipzip_mesh = deformers.localize(
         final_mesh,
         "local_face",
-        local_target_name="trigger_{}Mesh".format(prefix),
+        local_target_name="ddrig_{}Mesh".format(prefix),
         group_name=zip_grp,
     )
     cmds.parent(zip_grp, rig_grp)

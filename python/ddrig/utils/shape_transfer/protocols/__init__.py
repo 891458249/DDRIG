@@ -2,7 +2,7 @@ import os
 import glob
 import importlib
 import inspect
-from trigger.utils.shape_transfer.protocol_core import ProtocolCore
+from ddrig.utils.shape_transfer.protocol_core import ProtocolCore
 
 classes = []
 modules = glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))

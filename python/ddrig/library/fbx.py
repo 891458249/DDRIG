@@ -7,7 +7,7 @@ https://knowledge.autodesk.com/support/maya/learn-explore/caas/CloudHelp/cloudhe
 import os
 from maya import cmds
 from maya import mel
-from trigger.core import validate
+from ddrig.core import validate
 
 validate.plugin("fbxmaya")
 

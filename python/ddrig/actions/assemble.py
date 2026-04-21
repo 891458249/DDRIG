@@ -3,16 +3,16 @@ import os
 
 from maya import cmds
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import naming
+from ddrig.library import naming
 
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
-from trigger.ui.widgets.browser import BrowserButton
-from trigger.ui import custom_widgets
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui.widgets.browser import BrowserButton
+from ddrig.ui import custom_widgets
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "alembic_path_list": [],

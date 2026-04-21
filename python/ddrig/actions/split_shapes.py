@@ -4,20 +4,20 @@ import os
 
 from maya import cmds
 
-from trigger.core import io
-from trigger.actions import weights
-from trigger.library import deformers, functions, selection
-from trigger.ui import custom_widgets
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
-from trigger.ui.layouts.save_box import SaveBoxLayout
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import feedback
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import io
+from ddrig.actions import weights
+from ddrig.library import deformers, functions, selection
+from ddrig.ui import custom_widgets
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.layouts.save_box import SaveBoxLayout
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import feedback
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.utils import shape_splitter
+from ddrig.utils import shape_splitter
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {
@@ -142,7 +142,7 @@ class Split_shapes(weights.Weights):
         browse_path_pb = BrowserButton(
             mode="openFile",
             update_widget=file_path_le,
-            filterExtensions=["Trigger Split Files (*.trsplit)"],
+            filterExtensions=["DDRIG Split Files (*.trsplit)"],
             overwrite_check=False,
         )
         file_path_hLay.addWidget(browse_path_pb)
@@ -152,7 +152,7 @@ class Split_shapes(weights.Weights):
         savebox_lay = SaveBoxLayout(
             alignment="horizontal",
             update_widget=file_path_le,
-            filter_extensions=["Trigger Split Files (*.trsplit)"],
+            filter_extensions=["DDRIG Split Files (*.trsplit)"],
             overwrite_check=True,
             control_model=ctrl,
         )

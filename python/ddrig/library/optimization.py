@@ -1,8 +1,8 @@
 """Collection of methods aiming to optimize the scene and rig itself"""
 
 from maya import cmds
-from trigger.library import arithmetic as ar
-from trigger.library.naming import convert_to_ranged_format
+from ddrig.library import arithmetic as ar
+from ddrig.library.naming import convert_to_ranged_format
 
 
 def switch_connections(

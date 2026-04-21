@@ -5,13 +5,13 @@ import itertools
 
 from maya import cmds
 
-from trigger.ui.Qt import QtWidgets
-from trigger.library import functions, attribute, deformers
+from ddrig.ui.Qt import QtWidgets
+from ddrig.library import functions, attribute, deformers
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "blendshapes_group": "",
@@ -35,7 +35,7 @@ class Morph(ActionCore):
         self.morphGrp = None
         self.morphHook = None
         self.morphMesh = None
-        self.bsNode = "trigger_morph_blendshape"
+        self.bsNode = "ddrig_morph_blendshape"
 
     def feed(self, action_data, *args, **kwargs):
         """Feeds the instance with the action data stored in actions session"""
@@ -141,7 +141,7 @@ class Morph(ActionCore):
             cmds.parent(self.morphHook, rig_grp)
 
         if not self.morphMesh:
-            self.morphMesh = cmds.duplicate(self.neutralMesh, name="trigger_morphMesh")[
+            self.morphMesh = cmds.duplicate(self.neutralMesh, name="ddrig_morphMesh")[
                 0
             ]
             cmds.parent(self.morphMesh, self.morphGrp)
@@ -159,7 +159,7 @@ class Morph(ActionCore):
         # self.morphHook = cmds.group(name="morph_hook", em=True)
         # attribute.lockAndHide(self.morphHook)
         # cmds.parent(self.morphHook, self.morphGrp)
-        # self.morphMesh = cmds.duplicate(self.neutralMesh, name="trigger_morphMesh")[0]
+        # self.morphMesh = cmds.duplicate(self.neutralMesh, name="ddrig_morphMesh")[0]
         # cmds.parent(self.morphMesh, self.morphGrp)
 
     def create_hook_node(self):

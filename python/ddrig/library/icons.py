@@ -3,8 +3,8 @@
 # pylint: disable=too-many-lines
 
 from maya import cmds
-from trigger.library import functions
-from trigger.library import naming
+from ddrig.library import functions
+from ddrig.library import naming
 
 
 class Icon(object):

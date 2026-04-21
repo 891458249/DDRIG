@@ -5,11 +5,11 @@ import logging
 
 from maya import cmds
 
-from trigger.library import deformers
-from trigger.library import functions
-from trigger.library import attribute
+from ddrig.library import deformers
+from ddrig.library import functions
+from ddrig.library import attribute
 
-from trigger.utils.eyebulge.methodology.method_base import MethodBase
+from ddrig.utils.eyebulge.methodology.method_base import MethodBase
 
 LOG = logging.getLogger(__name__)
 

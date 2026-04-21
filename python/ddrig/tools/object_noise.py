@@ -1,7 +1,7 @@
 import pymel.core as pm
 import random
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui.qtmaya import get_main_maya_window
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.qtmaya import get_main_maya_window
 from maya import OpenMayaUI as omui
 
 WINDOW_NAME = "Noise Expressions"

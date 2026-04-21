@@ -1,4 +1,4 @@
-"""Logging Module for Trigger"""
+"""Logging Module for DDRIG"""
 import sys
 import logging
 import os

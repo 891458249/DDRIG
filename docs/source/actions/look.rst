@@ -1,5 +1,5 @@
 .. _look:
-.. |look| image:: ../../../python/trigger/ui/icons/look.png
+.. |look| image:: ../../../python/ddrig/ui/icons/look.png
 
 ===========================
 Look |look|
@@ -13,7 +13,7 @@ To prevent that, always make sure that the maya outliner hiearchy matches the sa
 
 Essentially, the most fool-proof way is to put and keep the Look action right after the import Asset or assemble action where we bring in the geometries.
 
-    - **File Path**: The absolute path where the trigger look file (.trl) will be stored AND saved with 'Save' button
+    - **File Path**: The absolute path where the ddrig look file (.trl) will be stored AND saved with 'Save' button
     - **Save Button**: Saves all shaders and shader-mesh pair information in the CURRENT scene to the file defined in File Path. Think twice before hitting that. Use Save as or increment if you have doubts.
     - **Save As**: Brings up the file browser to specify a save as location and saves it
     - **Increment**: Versions up the file defined in File Path.

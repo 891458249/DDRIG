@@ -2,16 +2,16 @@
 
 from maya import cmds
 import platform
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.core.decorators import keepselection
+from ddrig.core.decorators import keepselection
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui.layouts.save_box import SaveBoxLayout
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui.layouts.save_box import SaveBoxLayout
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {

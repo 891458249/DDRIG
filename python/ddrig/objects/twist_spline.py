@@ -1,13 +1,13 @@
 from maya import cmds
 import maya.api.OpenMaya as om
 
-from trigger.library import functions, joint
-from trigger.library import attribute
-from trigger.library import naming
-from trigger.library import api
+from ddrig.library import functions, joint
+from ddrig.library import attribute
+from ddrig.library import naming
+from ddrig.library import api
 
-# from trigger.library import controllers as ic
-from trigger.objects.controller import Controller
+# from ddrig.library import controllers as ic
+from ddrig.objects.controller import Controller
 
 
 class TwistSpline(object):

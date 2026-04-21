@@ -1,8 +1,8 @@
 """Widget to be used to select published assets. Derived from task_selection"""
 
-from trigger.ui.vcs_widgets.task_selection import TaskSelection
+from ddrig.ui.vcs_widgets.task_selection import TaskSelection
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
 
 

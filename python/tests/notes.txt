@@ -17,98 +17,98 @@ Matrix constraint should not use be used if:
 import sys
 import os
 
-# add the system path new trigger folder exclusively to prevent clashes
-# each new new trigger module uses trigger.<module> paths to acces modules
+# add the system path new ddrig folder exclusively to prevent clashes
+# each new new ddrig module uses ddrig.<module> paths to acces modules
 
-trigger_path = "C:\\Users\\kutlu\\Documents\\maya\\scripts\\TRigger"
+ddrig_path = "C:\\Users\\kutlu\\Documents\\maya\\scripts\\TRigger"
 
-if trigger_path not in sys.path:
-    sys.path.append(trigger_path)
+if ddrig_path not in sys.path:
+    sys.path.append(ddrig_path)
 
 # load reload all modules
 
 # load reload all modules
 
 # Core
-from trigger.core import undo_dec
+from ddrig.core import undo_dec
 reload(undo_dec)
-from trigger.core import feedback
+from ddrig.core import feedback
 reload(feedback)
-from trigger.core import io
+from ddrig.core import io
 reload(io)
-from trigger.core import settings
+from ddrig.core import settings
 reload(settings)
 
 # Base
-from trigger.base import initials
+from ddrig.base import initials
 reload(initials)
-from trigger.base import builder
+from ddrig.base import builder
 reload(builder)
-from trigger.base import session
+from ddrig.base import session
 
 # Library
-from trigger.library import controllers
+from ddrig.library import controllers
 reload(controllers)
-from trigger.library import functions
+from ddrig.library import functions
 reload(functions)
-from trigger.library import ribbon
+from ddrig.library import ribbon
 reload(ribbon)
-from trigger.library import tools
+from ddrig.library import tools
 reload(tools)
-from trigger.library import twist_spline
+from ddrig.library import twist_spline
 reload(twist_spline)
 
 # Modules
-import trigger.modules.__init__
-reload(trigger.modules.__init__)
+import ddrig.modules.__init__
+reload(ddrig.modules.__init__)
 
-from trigger import modules
+from ddrig import modules
 reload(modules)
-from trigger.modules import base
+from ddrig.modules import base
 reload(base)
-from trigger.modules import arm
+from ddrig.modules import arm
 reload(arm)
-from trigger.modules import finger
+from ddrig.modules import finger
 reload(finger)
-from trigger.modules import head
+from ddrig.modules import head
 reload(head)
-from trigger.modules import leg
+from ddrig.modules import leg
 reload(leg)
-from trigger.modules import connector
+from ddrig.modules import connector
 reload(connector)
-from trigger.modules import spine
+from ddrig.modules import spine
 reload(spine)
-from trigger.modules import tail
+from ddrig.modules import tail
 reload(tail)
-from trigger.modules import tentacle
+from ddrig.modules import tentacle
 reload(tentacle)
 
 # Actions
-import trigger.actions.__init__
-reload(trigger.actions.__init__)
-from trigger.actions import cleaning
+import ddrig.actions.__init__
+reload(ddrig.actions.__init__)
+from ddrig.actions import cleaning
 reload(cleaning)
-from trigger.actions import kinematics
+from ddrig.actions import kinematics
 reload(kinematics)
-from trigger.actions import master
+from ddrig.actions import master
 reload(master)
-from trigger.actions import weights
+from ddrig.actions import weights
 reload(weights)
 
 # Utils
-from trigger.utils import mr_cubic
+from ddrig.utils import mr_cubic
 reload(mr_cubic)
-from trigger.utils import space_switcher
+from ddrig.utils import space_switcher
 reload(space_switcher)
 
 # # old UI
-# from trigger.ui import start
+# from ddrig.ui import start
 # reload(start)
 # start.MainUI().show()
 # new UI
-from trigger import modules
+from ddrig import modules
 reload(modules)
-from trigger.ui import main
+from ddrig.ui import main
 reload(main)
 main.MainUI() # show() runs inside the init
 

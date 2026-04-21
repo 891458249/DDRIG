@@ -3,9 +3,9 @@
 from maya import cmds
 from maya.api import OpenMaya
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 JOINT_TYPE_DICT = {
     1: "Root",
@@ -47,7 +47,7 @@ AXIS_CONVERSION_DICT = {}
 
 def set_joint_type(joint, type_name):
     """
-    Sets Trigger Joint Type
+    Sets DDRIG Joint Type
     Args:
         joint: (String) Source Joint
         type_name: (String) Name of the joint
@@ -187,7 +187,7 @@ def orient_joints(
 
 
 def identify(joint, modules_dictionary):
-    """Identify joints for Trigger
+    """Identify joints for DDRIG
     Args:
         joint: (String) Joint to query
         modules_dictionary: (Dictionary)

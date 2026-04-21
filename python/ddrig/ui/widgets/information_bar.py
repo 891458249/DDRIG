@@ -1,6 +1,6 @@
 """Custom widget to display information to the user."""
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
 
 class InformationBar(QtWidgets.QWidget):

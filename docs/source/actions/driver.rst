@@ -1,5 +1,5 @@
 .. _driver:
-.. |driver| image:: ../../../python/trigger/ui/icons/driver.png
+.. |driver| image:: ../../../python/ddrig/ui/icons/driver.png
 
 =========================
 Driver |driver|

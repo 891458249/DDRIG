@@ -4,19 +4,19 @@ import os
 import shutil
 
 from maya import cmds
-from trigger.core import io
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import io
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import selection
+from ddrig.library import selection
 
-from trigger.ui import custom_widgets
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
-from trigger.ui.layouts.save_box import SaveBoxLayout
-from trigger.ui.Qt import QtWidgets  # for progressbar
-from trigger.ui import feedback
+from ddrig.ui import custom_widgets
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.layouts.save_box import SaveBoxLayout
+from ddrig.ui.Qt import QtWidgets  # for progressbar
+from ddrig.ui import feedback
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {"nodes": [], "nodes_file_path": "", "skip_non_existing": True}
@@ -54,7 +54,7 @@ class Node_presets(ActionCore):
         for node_data in data_list:
             node = node_data.get("name", None)
             if not node_data.get("name", None) in self.nodes:
-                continue  # if the node is not exist in trigger action list , skip that
+                continue  # if the node is not exist in ddrig action list , skip that
             node_preset = os.path.join(remote_presets_folder, "%s.mel" % node)
             if not os.path.exists(node_preset) and not self.skip_non_existing:
                 log.error(
@@ -111,7 +111,7 @@ class Node_presets(ActionCore):
         browse_path_pb = BrowserButton(
             mode="openFile",
             update_widget=file_path_le,
-            filterExtensions=["Trigger Preset Files (*.trp)"],
+            filterExtensions=["DDRIG Preset Files (*.trp)"],
             overwrite_check=False,
         )
         file_path_hLay.addWidget(browse_path_pb)
@@ -132,7 +132,7 @@ class Node_presets(ActionCore):
         savebox_lay = SaveBoxLayout(
             alignment="horizontal",
             update_widget=file_path_le,
-            filter_extensions=["Trigger Weight Files (*.trp)"],
+            filter_extensions=["DDRIG Weight Files (*.trp)"],
             overwrite_check=True,
             control_model=ctrl,
         )
@@ -174,9 +174,9 @@ class Node_presets(ActionCore):
     def save_preset(node, target_folder):
         """saves the preset to a specific folder. The file will be saved with the node name"""
         presets_folder = os.path.join(cmds.about(preferences=True), "presets")
-        cmds.nodePreset(save=(node, "trigger_tmp_preset"))
+        cmds.nodePreset(save=(node, "ddrig_tmp_preset"))
         preset_name = "{0}Preset_{1}.mel".format(
-            cmds.objectType(node), "trigger_tmp_preset"
+            cmds.objectType(node), "ddrig_tmp_preset"
         )
         source_path = os.path.join(presets_folder, preset_name)
         print(source_path, os.path.isfile(source_path))
@@ -197,11 +197,11 @@ class Node_presets(ActionCore):
         if not os.path.isdir(presets_folder):
             os.mkdir(presets_folder)
         preset_name = "{0}Preset_{1}.mel".format(
-            cmds.objectType(node), "trigger_tmp_preset"
+            cmds.objectType(node), "ddrig_tmp_preset"
         )
         target_path = os.path.join(presets_folder, preset_name)
         shutil.copy(source_file, target_path)
-        cmds.nodePreset(load=(node, "trigger_tmp_preset"))
+        cmds.nodePreset(load=(node, "ddrig_tmp_preset"))
         os.remove(target_path)
 
     @staticmethod

@@ -59,10 +59,10 @@ incrementalSave/
 *.orig
 
 # === Large third-party binaries (fetch separately if needed) ===
-python/trigger/tools/face_mocap/ffmpeg.exe
-python/trigger/utils/dembones/Linux/
-python/trigger/utils/dembones/MacOS/
-python/trigger/utils/dembones/Windows/
+python/ddrig/tools/face_mocap/ffmpeg.exe
+python/ddrig/utils/dembones/Linux/
+python/ddrig/utils/dembones/MacOS/
+python/ddrig/utils/dembones/Windows/
 
 # === Maya sample scenes and assets (kept external to repo) ===
 samples/

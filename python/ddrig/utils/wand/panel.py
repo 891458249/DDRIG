@@ -1,7 +1,7 @@
-"""tools to be used with trigger rigs
+"""tools to be used with ddrig rigs
 
 :created: 29 June 2020
-:author: Arda Kutlu <arda.kutlu@rebellion.co.uk>
+:author: Drafter <d891458249@gmail.com>
 """
 
 import os
@@ -13,19 +13,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from trigger.library import fbx
+from ddrig.library import fbx
 
-from trigger.core import compatibility
-from trigger.library import functions
-from trigger.library import connection
-from trigger.ui.Qt import QtWidgets, QtCore, QtCompat
-from trigger.ui import feedback
+from ddrig.core import compatibility
+from ddrig.library import functions
+from ddrig.library import connection
+from ddrig.ui.Qt import QtWidgets, QtCore, QtCompat
+from ddrig.ui import feedback
 from maya import OpenMayaUI as omui
 from maya import cmds
 from maya import mel
 
 __version__ = "0.0.4"
-windowName = "Trigger Tool v%s" % __version__
+windowName = "DDRIG Tool v%s" % __version__
 qss = """
 QPushButton
 {
@@ -100,9 +100,9 @@ def undo(func):
             return returned
     return decorator
 
-class TriggerTool(object):
+class DDRIGTool(object):
     def __init__(self):
-        super(TriggerTool, self).__init__()
+        super(DDRIGTool, self).__init__()
         self.definitions = self.load_globals()
 
         # self.all_ctrls = self.get_all_controllers()
@@ -380,7 +380,7 @@ def dock_window(dialog_class):
 class MainUI(QtWidgets.QWidget):
 
     instances = list()
-    CONTROL_NAME = "triggerTools"
+    CONTROL_NAME = "ddrigTools"
     DOCK_LABEL_NAME = windowName
 
     # def __init__(self):
@@ -405,7 +405,7 @@ class MainUI(QtWidgets.QWidget):
         self.centralwidget.setFocusPolicy(QtCore.Qt.StrongFocus)
 #
         self.dynamicButtons = []
-        self.tr_tool = TriggerTool()
+        self.tr_tool = DDRIGTool()
         self.feedback = feedback.Feedback()
 
         self.buildUI()

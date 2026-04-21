@@ -1,6 +1,6 @@
 """Functions, checks and queries for selection dependant tasks"""
 from maya import cmds
-from trigger.library import functions
+from ddrig.library import functions
 
 
 def get_selection_type():

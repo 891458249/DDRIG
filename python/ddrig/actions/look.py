@@ -3,16 +3,16 @@
 import os
 from maya import cmds
 
-from trigger.core import io
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import io
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui.layouts import save_box
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
-from trigger.core.decorators import keepselection
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui.layouts import save_box
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.core.decorators import keepselection
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {
@@ -100,7 +100,7 @@ class Look(ActionCore):
         browse_path_pb = BrowserButton(
             mode="openFile",
             update_widget=file_path_le,
-            filterExtensions=["Trigger Look Files (*.trl)"],
+            filterExtensions=["DDRIG Look Files (*.trl)"],
             overwrite_check=False,
         )
         file_path_hLay.addWidget(browse_path_pb)
@@ -110,7 +110,7 @@ class Look(ActionCore):
         savebox_lay = save_box.SaveBoxLayout(
             alignment="horizontal",
             update_widget=file_path_le,
-            filter_extensions=["Trigger Look Files (*.trl)"],
+            filter_extensions=["DDRIG Look Files (*.trl)"],
             overwrite_check=True,
             control_model=ctrl,
         )

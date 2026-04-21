@@ -1,4 +1,4 @@
-global proc shelf_trigger () {
+global proc shelf_ddrig () {
     global string $gBuffStr;
     global string $gBuffStr0;
     global string $gBuffStr1;
@@ -14,12 +14,12 @@ global proc shelf_trigger () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Trigger - Modular Rigging Tool"
+        -annotation "DDRIG - Modular Rigging Tool"
         -enableBackground 0
         -backgroundColor 0 0 0
         -highlightColor 0.321569 0.521569 0.65098
         -align "center"
-        -label "Trigger"
+        -label "DDRIG"
         -labelOffset 0
         -rotation 0
         -flipX 0
@@ -28,12 +28,12 @@ global proc shelf_trigger () {
         -font "plainLabelFont"
         -overlayLabelColor 0.8 0.8 0.8
         -overlayLabelBackColor 0 0 0 0.5
-        -image "trigger.png"
-        -image1 "trigger.png"
+        -image "ddrig.png"
+        -image1 "ddrig.png"
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.ui import main\nmain.launch()"
+        -command "from ddrig.ui import main\nmain.launch()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -67,7 +67,7 @@ global proc shelf_trigger () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.utils import skin_transfer\nskin_transfer.skin_transfer()"
+        -command "from ddrig.utils import skin_transfer\nskin_transfer.skin_transfer()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -82,12 +82,12 @@ global proc shelf_trigger () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Trigger Selection and mocap remap tool"
+        -annotation "DDRIG Selection and mocap remap tool"
         -enableBackground 0
         -backgroundColor 0 0 0
         -highlightColor 0.321569 0.521569 0.65098
         -align "center"
-        -label "Trigger Selector"
+        -label "DDRIG Selector"
         -labelOffset 0
         -rotation 0
         -flipX 0
@@ -96,12 +96,12 @@ global proc shelf_trigger () {
         -font "plainLabelFont"
         -overlayLabelColor 0.8 0.8 0.8
         -overlayLabelBackColor 0 0 0 0.5
-        -image "triggerTools.png"
-        -image1 "triggerTools.png"
+        -image "ddrigTools.png"
+        -image1 "ddrigTools.png"
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.utils.wand import panel\npanel.dock_window(panel.MainUI)"
+        -command "from ddrig.utils.wand import panel\npanel.dock_window(panel.MainUI)"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -135,7 +135,7 @@ global proc shelf_trigger () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.utils import makeup\nmakeup.launch()"
+        -command "from ddrig.utils import makeup\nmakeup.launch()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -169,7 +169,7 @@ global proc shelf_trigger () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.utils import blendshape_transfer\nblendshape_transfer.MainUI().show()"
+        -command "from ddrig.utils import blendshape_transfer\nblendshape_transfer.MainUI().show()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -203,7 +203,7 @@ global proc shelf_trigger () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from trigger.utils.rom_randomizer import ui as rom_ui\nrom_ui.launch()"
+        -command "from ddrig.utils.rom_randomizer import ui as rom_ui\nrom_ui.launch()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

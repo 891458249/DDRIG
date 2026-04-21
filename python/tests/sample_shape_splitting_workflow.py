@@ -3,13 +3,13 @@
 import os
 from maya import cmds
 
-from trigger.core import io
+from ddrig.core import io
 reload(io)
-from trigger.library import deformers
+from ddrig.library import deformers
 reload(deformers)
-from trigger.actions import weights
+from ddrig.actions import weights
 reload(weights)
-from trigger.utils import shape_splitter
+from ddrig.utils import shape_splitter
 reload(shape_splitter)
 
 # instanciate class objects

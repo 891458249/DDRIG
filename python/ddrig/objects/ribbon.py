@@ -4,11 +4,11 @@
 """Creates a ribbon joint chain between given nodes"""
 
 from maya import cmds
-from trigger.library import functions, naming, connection
-from trigger.library import arithmetic as op
-from trigger.library import attribute
+from ddrig.library import functions, naming, connection
+from ddrig.library import arithmetic as op
+from ddrig.library import attribute
 
-from trigger.objects.controller import Controller
+from ddrig.objects.controller import Controller
 
 
 class Ribbon(object):

@@ -1,10 +1,10 @@
 from maya import cmds
 
-from trigger.library import functions, attribute, transform, connection, shading
-from trigger.objects.base_node import BaseNode
-from trigger.core import filelog
+from ddrig.library import functions, attribute, transform, connection, shading
+from ddrig.objects.base_node import BaseNode
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Filler(BaseNode):
@@ -41,7 +41,7 @@ class Filler(BaseNode):
         super(Filler, self).__init__()
         self.hold_group = transform.validate_group("%s_grp" % id_tag)
         try:
-            cmds.parent(self.hold_group, "trigger_grp")
+            cmds.parent(self.hold_group, "ddrig_grp")
         except (ValueError, RuntimeError) as e:
             pass
 

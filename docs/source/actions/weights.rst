@@ -1,5 +1,5 @@
 .. _weights:
-.. |weights| image:: ../../../python/trigger/ui/icons/weights.png
+.. |weights| image:: ../../../python/ddrig/ui/icons/weights.png
 
 =====================================
 Weights |weights|
@@ -23,7 +23,7 @@ Multiple meshes can be selected and **Add All Items** command can be used from t
 
 .. image:: /_images/weights_ss.png
 
-- **File Path**: The absolute path where the trigger weight file (.trw) will be stored AND saved with 'Save' button
+- **File Path**: The absolute path where the ddrig weight file (.trw) will be stored AND saved with 'Save' button
 - **Deformers**: The list of deformers currently defined in the action
 - **New**: Pops up an input window which you can enter the name of the new deformer manually.
 - **Rename**: Lets you edit the name of the currently selected deformer from the list

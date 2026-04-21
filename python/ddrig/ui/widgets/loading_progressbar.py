@@ -26,7 +26,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
 class LoadingProgressBar(QtWidgets.QProgressBar):
     def __init__(self):

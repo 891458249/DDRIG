@@ -3,15 +3,15 @@ from copy import deepcopy
 
 from maya import cmds
 
-from trigger.core import io
-from trigger.core import filelog
-from trigger.library import scene
-from trigger import actions
-from trigger.core.decorators import tracktime, windowsOff
-from trigger.core import compatibility as compat
-from trigger.ui.Qt import QtWidgets
+from ddrig.core import io
+from ddrig.core import filelog
+from ddrig.library import scene
+from ddrig import actions
+from ddrig.core.decorators import tracktime, windowsOff
+from ddrig.core import compatibility as compat
+from ddrig.ui.Qt import QtWidgets
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class ActionsSession(dict):

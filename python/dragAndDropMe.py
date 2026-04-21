@@ -17,15 +17,15 @@ def onMayaDroppedPythonFile(*args, **kwargs):
 
 
 def _add_module():
-    trigger_module = os.path.normpath(
+    ddrig_module = os.path.normpath(
         os.path.join(os.path.dirname(__file__), "maya_modules", "shelves_module")
     )
-    module_file_content = """+ trigger 0.0.1 %s""" % trigger_module
+    module_file_content = """+ ddrig 0.0.1 %s""" % ddrig_module
 
     user_module_dir = os.path.join(cmds.internalVar(uad=True), "modules")
     if not os.path.isdir(user_module_dir):
         os.mkdir(user_module_dir)
-    user_module_file = os.path.join(user_module_dir, "trigger.mod")
+    user_module_file = os.path.join(user_module_dir, "ddrig.mod")
     if os.path.isfile(user_module_file):
         os.remove(user_module_file)
 
@@ -35,8 +35,8 @@ def _add_module():
 
     # first time initialize
     cmds.confirmDialog(
-        title="Trigger Message",
-        message="Trigger Module Installed. Please restart Maya to see the shelf",
+        title="DDRIG Message",
+        message="DDRIG Module Installed. Please restart Maya to see the shelf",
     )
     pass
 

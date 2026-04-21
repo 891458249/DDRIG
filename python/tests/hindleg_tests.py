@@ -2,27 +2,27 @@ from maya import cmds
 
 cmds.file(new=True, f=True)
 
-from trigger.modules import spine
+from ddrig.modules import spine
 reload(spine)
 
-from trigger.library import icons
+from ddrig.library import icons
 reload(controllers)
 
-from trigger.library import tools
+from ddrig.library import tools
 reload(tools)
 
-from trigger.library import functions
+from ddrig.library import functions
 reload(functions)
 
-from trigger import modules
+from ddrig import modules
 reload(modules)
 
-from trigger.modules import hindleg
+from ddrig.modules import hindleg
 reload(hindleg)
 
-from trigger.modules import base
+from ddrig.modules import base
 
-from trigger.base import initials
+from ddrig.base import initials
 reload(initials)
 
 initializer = initials.Initials()

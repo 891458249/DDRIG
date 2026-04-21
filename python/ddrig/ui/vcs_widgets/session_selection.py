@@ -1,8 +1,8 @@
-"""Custom shotgrid control widget for selecting trigger sessions and versions """
+"""Custom shotgrid control widget for selecting ddrig sessions and versions """
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
-from trigger import version_control
+from ddrig import version_control
 
 
 class SessionSelection(QtWidgets.QHBoxLayout):

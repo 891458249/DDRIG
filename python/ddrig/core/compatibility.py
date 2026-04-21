@@ -4,9 +4,9 @@
 import sys
 
 if sys.version_info.major == 3:
-    from trigger.core.python3_only import flatten
+    from ddrig.core.python3_only import flatten
 else:
-    from trigger.core.python2_only import flatten
+    from ddrig.core.python2_only import flatten
 
 
 def encode(data):

@@ -1,7 +1,7 @@
 Interface
 +++++++++
 
-Trigger UI contains two main tabs
+DDRIG UI contains two main tabs
 
 Actions Tab
 ===========
@@ -21,7 +21,7 @@ Actions tab is the most important part of the UI and pretty much everything is h
 2. Actions list
 ~~~~~~~~~~~~~~~
 
-List of available actions in the current Trigger Session
+List of available actions in the current DDRIG Session
 Right click any action will display the following menu:
 
 .. image:: /_images/actions_list.png
@@ -67,7 +67,7 @@ Guides Tab
 
 Guides section is more similar to traditional modular rigging tools. In guides section, we will be creating the 'Guide Joints' which will work with 'Kinematics' action in Actions panel.
 
-Unlike Actions panels, joints created in Guides section is not going to be saved with trigger session. This panel is only for manipulating maya joints and adding them the correct attributes which will be used by trigger when creating the actual rig. 
+Unlike Actions panels, joints created in Guides section is not going to be saved with ddrig session. This panel is only for manipulating maya joints and adding them the correct attributes which will be used by ddrig when creating the actual rig. 
 
 The guides must exported in order to be used in Kinematic actions. The guides created from this section can be exported using File => Export guides menu item.
 
@@ -89,17 +89,17 @@ Defines the alignment of the next limb module that will be created
 
 - **Both**: Creates both Left and Right Modules at the same time and dynamically mirror links them together. In mirrored pairs Right sided (Red) modules cannot be manipulated and always mirror the Left side
 
-- **Auto**: This option is useful if you want to create paired limbs which does not share the same parent. For example, Right and Left thumbs of a character should be mirrored but they dont getting mirrored using the same joint as center. When Auto, trigger tries to find the corresponding parent pair joint instead of creating both limbs connected into the same joint.
+- **Auto**: This option is useful if you want to create paired limbs which does not share the same parent. For example, Right and Left thumbs of a character should be mirrored but they dont getting mirrored using the same joint as center. When Auto, ddrig tries to find the corresponding parent pair joint instead of creating both limbs connected into the same joint.
 
 2. Modules List
 ~~~~~~~~~~~~~~~
 
-This area contains all available limb modules in Trigger & pre-defined presets (Essentially, collection of modules with a hierarchy)
+This area contains all available limb modules in DDRIG & pre-defined presets (Essentially, collection of modules with a hierarchy)
 
 The numbers next to the modules means that how many joints will be drawn with that module. If the numbers are disabled and not editable, that means that module can only be created with fixed number of joints. For example, the Arm module can only have 4 guide joints defining shoulder, upper arm, elbow and hand
 
 .. warning:: 
-    The guide joints drawn into viewport is not going to be saved with the Trigger session! You need to export your guides to a .trg file from File -> Export Guides
+    The guide joints drawn into viewport is not going to be saved with the DDRIG session! You need to export your guides to a .trg file from File -> Export Guides
 
 Guide Creation
 --------------
@@ -111,7 +111,7 @@ Guide Creation
     .. image:: /_images/normal_mode.gif
 
 - **Define Mode**
-    Holding down *Ctrl* when the trigger window is activated will turn the outlines of the module buttons to green, activating 'Define' mode. In define mode, you can convert any joint hierarchy into Trigger guides.
+    Holding down *Ctrl* when the ddrig window is activated will turn the outlines of the module buttons to green, activating 'Define' mode. In define mode, you can convert any joint hierarchy into DDRIG guides.
 
     .. image:: /_images/define_guides.gif
 
@@ -131,7 +131,7 @@ Common properties are:
 - **Up Axis**: Defines the up-axis of the module. Default is +Y
 - **Mirror Axis**: defines in which axis the module will be mirrored. Default +X
 - **Look Axis**: Modules facing direction. Default +Z
-- **Inherit Orientation**: If this is checked, Trigger will assume the existing orientation of the guide joint as correct. Otherwise the orientations will be calculated automatically and only positional values will inherited. This is especially important for the modules using IK chains.
+- **Inherit Orientation**: If this is checked, DDRIG will assume the existing orientation of the guide joint as correct. Otherwise the orientations will be calculated automatically and only positional values will inherited. This is especially important for the modules using IK chains.
 
 Although these values are common for all modules, some or all may not be affecting anything depending on the complexity of the module
 

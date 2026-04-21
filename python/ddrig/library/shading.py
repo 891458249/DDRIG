@@ -1,8 +1,8 @@
 """Collection of shading related functions"""
 
 from maya import cmds
-from trigger.core import io
-from trigger.core.decorators import keepselection
+from ddrig.core import io
+from ddrig.core.decorators import keepselection
 
 
 def get_file_nodes(mesh_transforms):

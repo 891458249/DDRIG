@@ -4,10 +4,10 @@ from maya import cmds
 
 import logging
 
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui.layouts.scene_select import SceneSelectLayout
-from trigger.utils.rom_randomizer import rom_randomizer
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui.layouts.scene_select import SceneSelectLayout
+from ddrig.utils.rom_randomizer import rom_randomizer
 
 LOG = logging.getLogger(__name__)
 

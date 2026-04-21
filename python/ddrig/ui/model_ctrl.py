@@ -1,8 +1,8 @@
 """Controller module for Model/View"""
-from trigger.core import filelog
-from trigger.ui.Qt import QtWidgets
+from ddrig.core import filelog
+from ddrig.ui.Qt import QtWidgets
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Controller(object):

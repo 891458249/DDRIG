@@ -1,5 +1,5 @@
 .. _assemble:
-.. |assemble| image:: ../../../python/trigger/ui/icons/assemble.png
+.. |assemble| image:: ../../../python/ddrig/ui/icons/assemble.png
 
 ===================
 Assemble |assemble|
@@ -20,7 +20,7 @@ very useful for combining different assets which will be united in a single rig 
     - **Add**: Brings up the browser menu to add a new alembic cache file
     - **Next Version**: Switches to the next version of selected alembic file, if there is any. Yellow means that either the file name does not have a version info or it is not the latest version.
     - **Previous Version**: Switches to the previous version of selected alembic file
-    - **Remove**: Removes the selected alembic file from the list. This does not delete the actual file in the file system. Just removes the Trigger definition
+    - **Remove**: Removes the selected alembic file from the list. This does not delete the actual file in the file system. Just removes the DDRIG definition
     - **Clear**: Removes everything from the list.
 
 .. tip:: 

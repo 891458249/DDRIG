@@ -1,9 +1,8 @@
 #####################################################################################################################
 ## SkinTransfer - Python Script
-## Copyright (C) Arda Kutlu
-## AUTHOR:	Arda Kutlu
-## e-mail: ardakutlu@gmail.com
-## Web: http://www.ardakutlu.com
+## Copyright (C) Drafter
+## AUTHOR:	Drafter
+## e-mail: d891458249@gmail.com
 ## VERSION:0.0.2
 ## CREATION DATE: 29.03.2017
 ## LAST MODIFIED DATE: 23.09.2020 / cmds convert
@@ -15,9 +14,9 @@
 
 import sys
 from maya import cmds
-from trigger.core.decorators import keepselection
-from trigger.library import selection, naming
-from trigger.ui import feedback
+from ddrig.core.decorators import keepselection
+from ddrig.library import selection, naming
+from ddrig.ui import feedback
 
 
 @keepselection

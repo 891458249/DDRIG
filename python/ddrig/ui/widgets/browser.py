@@ -1,8 +1,8 @@
 """Browser and File related widgets"""
 
 import os
-from trigger.ui.Qt import QtWidgets
-from trigger.library import naming
+from ddrig.ui.Qt import QtWidgets
+from ddrig.library import naming
 
 
 class BrowserButton(QtWidgets.QPushButton):

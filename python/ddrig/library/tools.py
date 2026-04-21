@@ -1,9 +1,9 @@
 # pylint: disable=consider-using-f-string
 
 from maya import cmds
-from trigger.library import functions, attribute, transform, connection
-from trigger.library import arithmetic as op
-from trigger.library import naming
+from ddrig.library import functions, attribute, transform, connection
+from ddrig.library import arithmetic as op
+from ddrig.library import naming
 
 
 def replace_controller(

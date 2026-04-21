@@ -1,12 +1,12 @@
 .. _kinematics:
-.. |kinematics| image:: ../../../python/trigger/ui/icons/kinematics.png
+.. |kinematics| image:: ../../../python/ddrig/ui/icons/kinematics.png
 
 ===========================
 Kinematics |kinematics|
 ===========================
 
 Kinematics Action is the core of rigging workflow.
-It uses the Trigger Guides created and exported from the Guides Tab in the main menu.
+It uses the DDRIG Guides created and exported from the Guides Tab in the main menu.
 
 Essentially, it rigs the modular hierarchy starting from the defined root(s)
 

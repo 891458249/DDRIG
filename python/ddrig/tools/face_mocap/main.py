@@ -1,11 +1,11 @@
 """Mapper module to import the csv and json files (livelink and audio2face)
 
 from importlib import reload
-from trigger.tools.face_mocap import decode
+from ddrig.tools.face_mocap import decode
 reload(decode)
-from trigger.tools.face_mocap import a2f
+from ddrig.tools.face_mocap import a2f
 reload(a2f)
-from trigger.tools.face_mocap import main as focap
+from ddrig.tools.face_mocap import main as focap
 reload(focap)
 
 handler = focap.FaceMocap()
@@ -23,7 +23,7 @@ import json
 import logging
 from pathlib import Path
 
-from trigger.ui.Qt import QtWidgets
+from ddrig.ui.Qt import QtWidgets
 
 
 from maya import cmds, mel
@@ -32,7 +32,7 @@ from maya import cmds, mel
 from .decode import extract_wav, extract_jpg
 from .a2f import process_wav_file
 
-from trigger.core.decorators import tracktime
+from ddrig.core.decorators import tracktime
 
 LOG = logging.getLogger(__name__)
 
@@ -242,9 +242,9 @@ class FaceMocap:
 
 
     @staticmethod
-    def __apply_livelinkface_data(controller, trigger_mappings, livelinkface_data, animlayer, start_frame, baked=True):
+    def __apply_livelinkface_data(controller, ddrig_mappings, livelinkface_data, animlayer, start_frame, baked=True):
         """Apply the livelinkface data to the controller."""
-        for key, data in trigger_mappings.items():
+        for key, data in ddrig_mappings.items():
             for dest_attr_pack in data:
                 attr = dest_attr_pack[0]
                 cmds.animLayer(animlayer, edit=True, attribute="{}.{}".format(controller, attr))
@@ -253,7 +253,7 @@ class FaceMocap:
                     cmds.setAttr(f"{controller}.{mult_attr}", dest_attr_pack[3])
         for frame, row_dict in enumerate(livelinkface_data):
             incase_sensitive_row_dict = {_key.lower(): _val for _key,_val in row_dict.items()}
-            for key, data in trigger_mappings.items():
+            for key, data in ddrig_mappings.items():
                 for dest_attr_pack in data:
                     mult = dest_attr_pack[3] if not baked else 1.0
                     attr = dest_attr_pack[0]
@@ -342,9 +342,9 @@ class FaceMocap:
             self.__neutralize(key_object, self._neutralize_frame, self.lower_face_mappings.values(), neutralize_layer)
 
     @staticmethod
-    def __apply_a2f_data(controller, trigger_mappings, audio_2_face_data, animlayer, start_frame, baked=True):
+    def __apply_a2f_data(controller, ddrig_mappings, audio_2_face_data, animlayer, start_frame, baked=True):
         """Apply the audio2face data to the controller."""
-        for key, data in trigger_mappings.items():
+        for key, data in ddrig_mappings.items():
             id = audio_2_face_data["facsNames"].index(key)
             for dest_attr_pack in data:
                 attr = dest_attr_pack[0]

@@ -1,15 +1,15 @@
 """I/O Class Module to handle all read/write operations
 :created: 19/04/2020
-:author: Arda Kutlu <ardakutlu@gmail.com>
+:author: Drafter <d891458249@gmail.com>
 """
 import os
 import json
 import shutil
 
-from trigger.core import filelog
-from trigger.core import compatibility as compat
+from ddrig.core import filelog
+from ddrig.core import compatibility as compat
 
-FILELOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+FILELOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class IO(dict):

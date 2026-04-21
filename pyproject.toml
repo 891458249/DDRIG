@@ -2,6 +2,6 @@
 requires = []
 
 [project]
-name = "trigger"
-authors = [{name = "Arda Kutlu", email = "ardakutlu@gmail.com"}]
+name = "ddrig"
+authors = [{name = "Drafter", email = "d891458249@gmail.com"}]
 dynamic = ["version", "description"]

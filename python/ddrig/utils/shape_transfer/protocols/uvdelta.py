@@ -3,7 +3,7 @@ This method allows the user to transfer Shapes between two topologically differe
 """
 
 from maya import cmds
-from trigger.utils.shape_transfer.protocol_core import ProtocolCore, Property
+from ddrig.utils.shape_transfer.protocol_core import ProtocolCore, Property
 
 
 class UvDeltaTransfer(ProtocolCore):

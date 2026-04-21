@@ -2,12 +2,12 @@ import sys
 
 import maya.cmds as cmds
 import base_test
-from trigger.core import filelog
+from ddrig.core import filelog
 
 from standalone_start import standalone_prep
 
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 # LOG.title("Module Tests")
 
@@ -16,9 +16,9 @@ class ModuleTests(base_test.TestCase):
     @classmethod
     def setUpClass(cls):
         standalone_prep()
-        from trigger.modules import base
-        from trigger.base import session
-        from trigger.base import initials
+        from ddrig.modules import base
+        from ddrig.base import session
+        from ddrig.base import initials
         cls.initializer = initials.Initials()
         cls.guides_handler = session.Session()
         cls.base_guides = base.Guides()

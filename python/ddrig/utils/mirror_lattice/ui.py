@@ -1,9 +1,9 @@
 import os
 import logging
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
-from trigger.ui.qtmaya import get_main_maya_window as main_window
+from ddrig.ui.qtmaya import get_main_maya_window as main_window
 
 from .mirror_lattice import MirrorLattice
 

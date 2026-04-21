@@ -3,7 +3,7 @@
 ## added som more functionality in order to use inside other python maya_modules
 
 from maya import cmds
-from trigger.library.connection import matrixConstraint
+from ddrig.library.connection import matrixConstraint
 
 
 def convertToCmFactor():

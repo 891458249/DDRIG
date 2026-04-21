@@ -1,19 +1,19 @@
 """Converts Blendshape nodes into joint deformations keeping rig controls"""
 from maya import cmds
-from trigger.utils import jointify
+from ddrig.utils import jointify
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import selection, deformers
+from ddrig.library import selection, deformers
 
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
-from trigger.ui.Qt import QtWidgets, QtGui
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
+from ddrig.ui.Qt import QtWidgets, QtGui
 
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {

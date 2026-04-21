@@ -1,19 +1,19 @@
 """Zipper Action which wraps around lipzip from face utils"""
 from maya import cmds
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import selection
-from trigger.utils.face import lip_zipper
+from ddrig.library import selection
+from ddrig.utils.face import lip_zipper
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
 # from PySide2 import QtWidgets  # temp
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "upper_edges": [],

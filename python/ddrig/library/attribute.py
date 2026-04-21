@@ -3,11 +3,11 @@
 import re
 from maya import cmds
 from maya import mel
-from trigger.core.decorators import undo
-from trigger.core import filelog
-from trigger.core import compatibility as compat
+from ddrig.core.decorators import undo
+from ddrig.core import filelog
+from ddrig.core import compatibility as compat
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 @undo
@@ -531,14 +531,14 @@ def create_global_joint_attrs(
     lookAxis=None,
 ):
     """
-    Creates Trigger specific global attrubutes.
+    Creates DDRIG specific global attrubutes.
 
     Args:
         joint: (String) Targer Joint
         moduleName: (String) Optional. Name of the module name. If none given, joint name will be used instead
-        upAxis: (Tuple) Overrides default upAxis Values for Trigger
-        mirrorAxis: (Tuple) Overrides default mirrorAxis Values for Trigger
-        lookAxis: (Tuple) Overrides default lookAxis Values for Trigger
+        upAxis: (Tuple) Overrides default upAxis Values for DDRIG
+        mirrorAxis: (Tuple) Overrides default mirrorAxis Values for DDRIG
+        lookAxis: (Tuple) Overrides default lookAxis Values for DDRIG
 
     Returns:
 

@@ -16,14 +16,14 @@ ACTION_DATA = {
                 }
 """
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.Qt import QtWidgets, QtCore
 
-from trigger.utils import space_switcher
+from ddrig.utils import space_switcher
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "switcher_definitions": [],

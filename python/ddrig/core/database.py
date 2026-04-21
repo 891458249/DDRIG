@@ -1,6 +1,6 @@
 """Class to handle the database/settings"""
 from copy import deepcopy
-from trigger.core import io
+from ddrig.core import io
 
 
 class Database(dict):
@@ -11,7 +11,7 @@ class Database(dict):
 
 
 class RecentSessions(list):
-    handler = io.IO(file_name="recentSessions.json", folder_name="trigger")
+    handler = io.IO(file_name="recentSessions.json", folder_name="ddrig")
 
     def __init__(self):
         super(RecentSessions, self).__init__()
@@ -33,7 +33,7 @@ class RecentSessions(list):
 
 
 class UserSettings(object):
-    handler = io.IO(file_name="userSettings.json", folder_name="trigger")
+    handler = io.IO(file_name="userSettings.json", folder_name="ddrig")
     compareData = {}
 
     def __init__(self):

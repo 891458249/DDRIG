@@ -2,18 +2,18 @@
 
 from maya import cmds
 from maya import mel
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import transform, selection
+from ddrig.library import transform, selection
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
 # from PySide2 import QtWidgets # temp
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {

@@ -1,9 +1,9 @@
 """UI for mocap mapper."""
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui.widgets.browser import FileBrowserBoxLayout
-from trigger.utils.mocap import mapper
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui.widgets.browser import FileBrowserBoxLayout
+from ddrig.utils.mocap import mapper
 
 _version = "0.1.0"
 WINDOW_NAME = "Mocap Mapper v{}".format(_version)

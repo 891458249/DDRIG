@@ -1,10 +1,10 @@
 """transform related functions"""
 from maya import cmds
-from trigger.core.decorators import keepframe
-from trigger.core import filelog
-from trigger.library import api
+from ddrig.core.decorators import keepframe
+from ddrig.core import filelog
+from ddrig.library import api
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 def set_limits(node, attribute, attr_min, attr_max):

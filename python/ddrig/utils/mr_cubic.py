@@ -1,8 +1,8 @@
 ## Mr. Cubic
 from maya import cmds
-from trigger.library import connection
-from trigger.library import functions
-from trigger.library import naming
+from ddrig.library import connection
+from ddrig.library import functions
+from ddrig.library import naming
 
 
 def mrCube(jointList, width=1):

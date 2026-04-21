@@ -1,17 +1,17 @@
 """Responsible for creating visualization fillers for controllers"""
 from maya import cmds
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import selection
-from trigger.utils import controller_filler
+from ddrig.library import selection
+from ddrig.utils import controller_filler
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui.widgets.color_button import ColorButton
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui.widgets.color_button import ColorButton
+from ddrig.ui import feedback
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "controllers": [],

@@ -1,4 +1,4 @@
-from trigger.ui.Qt import QtWidgets, QtCore, QtGui
+from ddrig.ui.Qt import QtWidgets, QtCore, QtGui
 
 
 class ColorButton(QtWidgets.QPushButton):

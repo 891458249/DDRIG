@@ -1,5 +1,5 @@
 .. _master:
-.. |master| image:: ../../../python/trigger/ui/icons/master.png
+.. |master| image:: ../../../python/ddrig/ui/icons/master.png
 
 ===========================
 Master |master|

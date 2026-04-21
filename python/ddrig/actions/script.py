@@ -5,15 +5,15 @@ from maya import cmds  # NEVER REMOVE THIS LINE!!!
 import platform
 import subprocess
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.core import dynamic_import as dyn  # NEVER REMOVE THIS LINE!!!
+from ddrig.core import dynamic_import as dyn  # NEVER REMOVE THIS LINE!!!
 
-from trigger.ui.Qt import QtWidgets, QtGui  # for progressbar
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets, QtGui  # for progressbar
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 ACTION_DATA = {

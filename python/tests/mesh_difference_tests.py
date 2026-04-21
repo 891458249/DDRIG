@@ -48,7 +48,7 @@ def get_difference(node_a, node_b, threshold=0.0, at_time=None):
 
 
 joint_mesh = "face_IDskin_GUIDE"
-bs_mesh = "trigger_morphMesh"
+bs_mesh = "ddrig_morphMesh"
 
 dif = get_difference(joint_mesh, bs_mesh, 0.001)
 std_deviation = get_std_deviation(list(dif))

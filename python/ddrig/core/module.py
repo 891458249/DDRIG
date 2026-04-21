@@ -1,16 +1,16 @@
-"""Core Class for all trigger modules."""
+"""Core Class for all ddrig modules."""
 
 from maya import cmds
 import maya.api.OpenMaya as om
-from trigger.library import functions
-from trigger.library import naming
-from trigger.library import attribute
-from trigger.library import connection
-from trigger.library import joint
+from ddrig.library import functions
+from ddrig.library import naming
+from ddrig.library import attribute
+from ddrig.library import connection
+from ddrig.library import joint
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": [],

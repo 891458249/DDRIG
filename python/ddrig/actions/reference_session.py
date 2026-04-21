@@ -1,21 +1,21 @@
-"""Reference another Trigger session"""
+"""Reference another DDRIG session"""
 
 import os
-from trigger.core import filelog
+from ddrig.core import filelog
 
-# from trigger.base.actions_session import ActionsSession
+# from ddrig.base.actions_session import ActionsSession
 
 import importlib
-from trigger.ui.Qt import QtWidgets
-from trigger.ui.widgets.browser import BrowserButton, FileLineEdit
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui.widgets.browser import BrowserButton, FileLineEdit
 
-from trigger.core.action import ActionCore
-
-
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+from ddrig.core.action import ActionCore
 
 
-ACTION_DATA = {"trigger_file_path": ""}
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
+
+
+ACTION_DATA = {"ddrig_file_path": ""}
 
 
 # Name of the class MUST be the capitalized version of file name. eg. morph.py => Morph, split_shapes.py => Split_shapes
@@ -25,27 +25,27 @@ class Reference_session(ActionCore):
     def __init__(self, **kwargs):
         super(Reference_session, self).__init__(kwargs)
         # user defined variables
-        self.triggerFilePath = None
+        self.ddrigFilePath = None
 
         # class variables
 
     def feed(self, action_data, *args, **kwargs):
         """Mandatory Method - Feeds the instance with the action data stored in actions session"""
-        self.triggerFilePath = action_data.get("trigger_file_path")
+        self.ddrigFilePath = action_data.get("ddrig_file_path")
 
     def action(self):
         """Mandatory Method - Execute Action"""
         # everything in this method will be executed automatically.
         # This method does not accept any arguments. all the user variable must be defined to the instance before
-        if not self.triggerFilePath:
-            log.warning("Reference Trigger Session path not defined. Skipping")
+        if not self.ddrigFilePath:
+            log.warning("Reference DDRIG Session path not defined. Skipping")
             return
-        if not os.path.isfile(self.triggerFilePath):
-            log.error("Trigger File does not exists => %s" % self.triggerFilePath)
+        if not os.path.isfile(self.ddrigFilePath):
+            log.error("DDRIG File does not exists => %s" % self.ddrigFilePath)
 
-        actions_session = importlib.import_module("trigger.base.actions_session")
+        actions_session = importlib.import_module("ddrig.base.actions_session")
         referenced_session = actions_session.ActionsSession()
-        referenced_session.load_session(self.triggerFilePath)
+        referenced_session.load_session(self.ddrigFilePath)
         referenced_session.run_all_actions(reset_scene=False)
 
     def save_action(self):
@@ -70,23 +70,23 @@ class Reference_session(ActionCore):
 
         """
 
-        trigger_file_path_lbl = QtWidgets.QLabel(text="Trigger Session:")
-        trigger_file_path_hLay = QtWidgets.QHBoxLayout()
-        trigger_file_path_le = FileLineEdit()
-        trigger_file_path_hLay.addWidget(trigger_file_path_le)
+        ddrig_file_path_lbl = QtWidgets.QLabel(text="DDRIG Session:")
+        ddrig_file_path_hLay = QtWidgets.QHBoxLayout()
+        ddrig_file_path_le = FileLineEdit()
+        ddrig_file_path_hLay.addWidget(ddrig_file_path_le)
         browse_path_pb = BrowserButton(
             mode="openFile",
-            update_widget=trigger_file_path_le,
-            filterExtensions=["Trigger Session (*.tr)"],
+            update_widget=ddrig_file_path_le,
+            filterExtensions=["DDRIG Session (*.tr)"],
             overwrite_check=False,
         )
-        trigger_file_path_hLay.addWidget(browse_path_pb)
-        layout.addRow(trigger_file_path_lbl, trigger_file_path_hLay)
+        ddrig_file_path_hLay.addWidget(browse_path_pb)
+        layout.addRow(ddrig_file_path_lbl, ddrig_file_path_hLay)
 
-        ctrl.connect(trigger_file_path_le, "trigger_file_path", str)
+        ctrl.connect(ddrig_file_path_le, "ddrig_file_path", str)
         ctrl.update_ui()
 
-        trigger_file_path_le.textChanged.connect(lambda x=0: ctrl.update_model())
+        ddrig_file_path_le.textChanged.connect(lambda x=0: ctrl.update_model())
         browse_path_pb.clicked.connect(lambda x=0: ctrl.update_model())
         # to validate on initial browse result
-        browse_path_pb.clicked.connect(trigger_file_path_le.validate)
+        browse_path_pb.clicked.connect(ddrig_file_path_le.validate)

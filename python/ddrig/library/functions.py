@@ -1,13 +1,13 @@
 from maya import cmds
-from trigger.library import api
-from trigger.library import naming
+from ddrig.library import api
+from ddrig.library import naming
 
 # USING MAYA API 2.0
 from maya.api import OpenMaya
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 def get_distance(node1, node2):

@@ -1,11 +1,11 @@
 .. _import_asset:
-.. |import_asset| image:: ../../../python/trigger/ui/icons/import_asset.png
+.. |import_asset| image:: ../../../python/ddrig/ui/icons/import_asset.png
 
 ===========================
 Import Asset |import_asset|
 ===========================
 
-Import Asset action is used to dynamically import any kind of asset into the build session. This is probably the most commonly used action in all Trigger sessions.
+Import Asset action is used to dynamically import any kind of asset into the build session. This is probably the most commonly used action in all DDRIG sessions.
 
 Any valid format can be brought in into the scene. Please note that, the import method is not using any namespaces and changes the names in case of
 clashes. If you want to collect assets together sharing a similar hierarchy use Assemble action instead.

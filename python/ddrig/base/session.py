@@ -1,19 +1,19 @@
 import os
 
 from maya import cmds
-from trigger.library import scene
-from trigger.library import functions
-from trigger.library import attribute
-from trigger.library import joint
-from trigger.library import api
+from ddrig.library import scene
+from ddrig.library import functions
+from ddrig.library import attribute
+from ddrig.library import joint
+from ddrig.library import api
 
-from trigger.core import io
-from trigger.core import filelog
-from trigger.core import compatibility as compat
+from ddrig.core import io
+from ddrig.core import filelog
+from ddrig.core import compatibility as compat
 
-from trigger.base import initials
+from ddrig.base import initials
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Session(object):
@@ -63,14 +63,14 @@ class Session(object):
         all_root_jnts_data = self.init.get_scene_roots()
         root_joints_list = []
 
-        all_trigger_joints = []
+        all_ddrig_joints = []
         for r_dict in all_root_jnts_data:
             root_jnt = r_dict.get("root_joint")
             root_joints_list.append(root_jnt)
             limb_dict, _, __ = self.init.getWholeLimb(root_jnt)
-            all_trigger_joints.append(limb_dict.values())
+            all_ddrig_joints.append(limb_dict.values())
 
-        flat_jnt_list = list(compat.flatten(all_trigger_joints))
+        flat_jnt_list = list(compat.flatten(all_ddrig_joints))
 
         save_data = []
 

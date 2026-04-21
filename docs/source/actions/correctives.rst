@@ -1,5 +1,5 @@
 .. _correctives:
-.. |correctives| image:: ../../../python/trigger/ui/icons/correctives.png
+.. |correctives| image:: ../../../python/ddrig/ui/icons/correctives.png
 
 =========================
 Correctives |correctives|
@@ -26,7 +26,7 @@ Each definition contains a set of properties:
 
 Sample workflow where we are putting a corrective on shoulder area:
 
-1. Run the trigger actions until this action. Most of the rig should be functional before adding correctives. Click 'Add Definition' button for the first corrective
+1. Run the ddrig actions until this action. Most of the rig should be functional before adding correctives. Click 'Add Definition' button for the first corrective
 2. Select the upper arm joint and click the "<" icon next to the 'Driver Transform' section
 3. Select the currently active controller that moves the upper arm. It should be the hand controller if the default mode is IK and upper Arm controller if FK.
 4. Hit "<" next to the Controller section.

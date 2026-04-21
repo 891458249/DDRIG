@@ -7,8 +7,8 @@ import logging
 
 from maya import cmds
 
-from trigger.library import fbx
-from trigger.library import connection
+from ddrig.library import fbx
+from ddrig.library import connection
 
 
 LOG = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ class MocapMapper(object):
             self._bake_ctrls()
 
         if not self.keep_fbx:
-            # cmds.delete(cmds.ls("TRIGGER_MOCAP_IMPORT*"))
+            # cmds.delete(cmds.ls("DDRIG_MOCAP_IMPORT*"))
             all_nodes = list(set(bind_pose_nodes + anim_nodes))
             cmds.delete(all_nodes)
 
@@ -189,7 +189,7 @@ class MocapMapper(object):
                 raise Exception("Invalid method: %s" % method)
             for joint, cont in data.items():
                 if cmds.objExists(joint) and cmds.objExists(cont):
-                    # connection.matrixConstraint(joint, cont, maintainOffset=True, skipRotate=skip_rotate, skipTranslate=skip_translate, prefix="TRIGGER_MOCAP_IMPORT")
+                    # connection.matrixConstraint(joint, cont, maintainOffset=True, skipRotate=skip_rotate, skipTranslate=skip_translate, prefix="DDRIG_MOCAP_IMPORT")
                     # cmds.parentConstraint(joint, cont, maintainOffset=True, skipRotate=skip_rotate, skipTranslate=skip_translate)
                     # if cmds.objExists(joint) and cmds.objExists(cont):
                     locked_translates_raw = cmds.listAttr(

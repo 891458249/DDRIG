@@ -1,12 +1,12 @@
 """UI for Face Mocap."""
 
 import dataclasses
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui.widgets.browser import FolderBrowserBoxLayout
-from trigger.tools.face_mocap import main as focap
-from trigger.ui import feedback
-from trigger.ui.widgets.information_bar import InformationBar
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui.widgets.browser import FolderBrowserBoxLayout
+from ddrig.tools.face_mocap import main as focap
+from ddrig.ui import feedback
+from ddrig.ui.widgets.information_bar import InformationBar
 
 _version = "1.0.0"
 WINDOW_NAME = "Face Mocap v{}".format(_version)

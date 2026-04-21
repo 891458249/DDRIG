@@ -1,15 +1,15 @@
 """Define and create selection sets."""
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import selection
+from ddrig.library import selection
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 """
 example action data:
@@ -94,9 +94,9 @@ class Selection_sets(ActionCore):
                 # collect existing set names
                 all_set_names = [x["name"] for x in self.setDefinitions]
                 uid_count = 1
-                set_name = "triggerSet1"
+                set_name = "ddrigSet1"
                 while set_name in all_set_names:
-                    set_name = "triggerSet%i" % uid_count
+                    set_name = "ddrigSet%i" % uid_count
                     uid_count += 1
             members = members or []
 

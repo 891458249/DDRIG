@@ -1,7 +1,7 @@
-from trigger.ui.Qt import QtWidgets
-from trigger.core import filelog
+from ddrig.ui.Qt import QtWidgets
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 class Feedback:

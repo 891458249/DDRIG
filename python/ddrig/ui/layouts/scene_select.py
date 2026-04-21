@@ -2,10 +2,10 @@
 
 from maya import cmds
 
-import trigger.library.selection
-from trigger.library import functions
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui import feedback
+import ddrig.library.selection
+from ddrig.library import functions
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui import feedback
 
 
 class SceneSelectLayout(QtWidgets.QHBoxLayout):
@@ -81,7 +81,7 @@ class SceneSelectLayout(QtWidgets.QHBoxLayout):
 
     def _get_selection(self):
         """Validate the selection."""
-        selection_type = trigger.library.selection.get_selection_type()
+        selection_type = ddrig.library.selection.get_selection_type()
         if selection_type != self.selection_type and self.selection_type != "attribute":
             self.feedback.pop_info(
                 title="Selection Error",

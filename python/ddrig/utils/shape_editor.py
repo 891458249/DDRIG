@@ -1,8 +1,8 @@
 """Editor for fixing/editing blendshape packs"""
 import re
 from maya import cmds
-from trigger.library import transform, functions
-from trigger.objects.base_node import BaseNode
+from ddrig.library import transform, functions
+from ddrig.objects.base_node import BaseNode
 
 
 class ShapeEditor(object):

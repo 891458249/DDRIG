@@ -2,7 +2,7 @@ import os
 import glob
 import importlib
 import inspect
-from trigger.core.action import ActionCore
+from ddrig.core.action import ActionCore
 
 def get_module_class(module):
     _data = {}
@@ -34,11 +34,11 @@ for mod in modules:
 # for action in __all__:
 #     # The following importlib.import_module approach may look more elegant but creating problems with inherited classes
 #     ########
-#     # z = importlib.import_module("trigger.actions.%s" % action)
+#     # z = importlib.import_module("ddrig.actions.%s" % action)
 #     # if sys.version_info.major >= 3:
 #     #     importlib.reload(z)
 #     # else:
 #     #     reload(z)
 #     #######
 #     # So for now, stick to this ugly thing..
-#     exec("import trigger.actions.%s" %action)
+#     exec("import ddrig.actions.%s" %action)

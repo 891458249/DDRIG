@@ -2,22 +2,22 @@
 
 from maya import cmds
 
-from trigger.core import validate
-from trigger.library import functions
-from trigger.library import connection
-from trigger.library import attribute
-from trigger.library import selection
-from trigger.library import deformers
-from trigger.library import naming
+from ddrig.core import validate
+from ddrig.library import functions
+from ddrig.library import connection
+from ddrig.library import attribute
+from ddrig.library import selection
+from ddrig.library import deformers
+from ddrig.library import naming
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 """
 example action data:

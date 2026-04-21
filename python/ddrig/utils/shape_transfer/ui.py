@@ -1,11 +1,11 @@
 import logging
 
-from trigger.ui.Qt import QtWidgets, QtCore
-from trigger.ui import qtmaya
+from ddrig.ui.Qt import QtWidgets, QtCore
+from ddrig.ui import qtmaya
 
-from trigger.utils.shape_transfer.main import ShapeTransfer
-from trigger.ui.feedback import Feedback
-from trigger.ui.layouts.scene_select import SceneSelectLayout
+from ddrig.utils.shape_transfer.main import ShapeTransfer
+from ddrig.ui.feedback import Feedback
+from ddrig.ui.layouts.scene_select import SceneSelectLayout
 
 LOG = logging.getLogger(__name__)
 

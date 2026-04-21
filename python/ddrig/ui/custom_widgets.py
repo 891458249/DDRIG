@@ -1,12 +1,12 @@
 import os
 import re
 
-from trigger.library import naming
-from trigger.ui.Qt import QtWidgets, QtCore, QtGui
-from trigger.ui import feedback
-from trigger.ui.widgets.browser import BrowserButton
+from ddrig.library import naming
+from ddrig.ui.Qt import QtWidgets, QtCore, QtGui
+from ddrig.ui import feedback
+from ddrig.ui.widgets.browser import BrowserButton
 
-# TODO move each widget into separate filen under trigger.ui.widgets
+# TODO move each widget into separate filen under ddrig.ui.widgets
 
 
 class ValidatedLineEdit(QtWidgets.QLineEdit):

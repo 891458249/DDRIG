@@ -1,13 +1,13 @@
 from maya import cmds
 import maya.api.OpenMaya as om
-from trigger.core.decorators import keepselection
+from ddrig.core.decorators import keepselection
 
-from trigger.library import deformers, functions, selection, interface, api
+from ddrig.library import deformers, functions, selection, interface, api
 
-from trigger.ui.qtmaya import get_main_maya_window
-from trigger.ui.Qt import QtWidgets
-from trigger.ui import custom_widgets
-from trigger.ui import feedback
+from ddrig.ui.qtmaya import get_main_maya_window
+from ddrig.ui.Qt import QtWidgets
+from ddrig.ui import custom_widgets
+from ddrig.ui import feedback
 
 windowName = "Blendshape Transfer v0.0.2"
 

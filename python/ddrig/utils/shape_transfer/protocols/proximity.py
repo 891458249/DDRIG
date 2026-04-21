@@ -1,8 +1,8 @@
 """Proximity Wrap Topology Transfer Protocol."""
 
 from maya import cmds
-from trigger.library import deformers
-from trigger.utils.shape_transfer.protocol_core import ProtocolCore, Property
+from ddrig.library import deformers
+from ddrig.utils.shape_transfer.protocol_core import ProtocolCore, Property
 
 
 class ProximityTransfer(ProtocolCore):

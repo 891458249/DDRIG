@@ -1,5 +1,5 @@
 from maya import cmds
-from trigger.library import connection, attribute
+from ddrig.library import connection, attribute
 
 
 class Angle(object):

@@ -1,11 +1,16 @@
-"""Shotgrid toolkit"""
+"""Shotgrid toolkit — DEPRECATED.
+
+This module is a pre-fork ShotGrid integration.
+ShotGrid template keys (asset_trigger_*) preserved for SG schema
+compatibility. Scheduled for removal in a future cleanup pass.
+"""
 import re
 import os
 from maya import cmds
 from rbl_pipe_sg import template, load, publish
-from trigger.core import filelog
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 sg_script = "rbl_pipe_maya"
 sg_key = "nn5lcvmojkfqgbzUkhbwdh%nc"
@@ -14,7 +19,7 @@ MAIN_TASK_PREFIX = "main"
 
 # templates
 #
-# Trigger
+# DDRIG
 #
 
 work_area_t = "asset_work_area_trigger"
@@ -168,12 +173,12 @@ class VersionControl(object):
         return filtered_tasks
 
     def get_sessions(self, asset, step, variant):
-        """Returns trigger session (.tr) files under the asset"""
+        """Returns ddrig session (.tr) files under the asset"""
         _session_data = self.__get_session_data(asset, step, variant)
         return list(sorted(_session_data.keys()))
 
     def get_session_versions(self, asset, step, variant, session_part_name):
-        """Returns the versions of specified trigger session file"""
+        """Returns the versions of specified ddrig session file"""
         _session_data = self.__get_session_data(asset, step, variant)
         return _session_data.get(session_part_name, [])
 

@@ -1,20 +1,20 @@
 from maya import cmds
 import maya.api.OpenMaya as om
-from trigger.library import functions, joint
-from trigger.library import naming
-from trigger.library import attribute
-from trigger.library import api
-from trigger.library import connection
-from trigger.library import arithmetic as op
-from trigger.objects.ribbon import Ribbon
-from trigger.objects.controller import Controller
-from trigger.objects import measure
-from trigger.library import tools
-from trigger.core.module import ModuleCore, GuidesCore
+from ddrig.library import functions, joint
+from ddrig.library import naming
+from ddrig.library import attribute
+from ddrig.library import api
+from ddrig.library import connection
+from ddrig.library import arithmetic as op
+from ddrig.objects.ribbon import Ribbon
+from ddrig.objects.controller import Controller
+from ddrig.objects import measure
+from ddrig.library import tools
+from ddrig.core.module import ModuleCore, GuidesCore
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": ["Collar", "Shoulder", "Elbow", "Hand"],

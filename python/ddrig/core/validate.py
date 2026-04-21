@@ -1,10 +1,10 @@
 """Validate functions"""
 
 from maya import cmds
-from trigger.core import filelog
-from trigger.ui.feedback import Feedback
+from ddrig.core import filelog
+from ddrig.ui.feedback import Feedback
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 FEED = Feedback()
 
 

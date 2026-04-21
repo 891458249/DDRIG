@@ -2,14 +2,14 @@
 from maya import cmds
 from maya import mel
 
-from trigger.core import filelog
-from trigger.core.action import ActionCore
+from ddrig.core import filelog
+from ddrig.core.action import ActionCore
 
-from trigger.library import functions, connection, shading
+from ddrig.library import functions, connection, shading
 
-from trigger.ui.Qt import QtWidgets  # for progressbar
+from ddrig.ui.Qt import QtWidgets  # for progressbar
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 ACTION_DATA = {
     "delete_unknown_nodes": True,

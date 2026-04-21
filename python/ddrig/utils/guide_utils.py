@@ -1,9 +1,9 @@
 """Guide related utility functions"""
 
 from maya import cmds
-from trigger.utils import parentToSurface
-from trigger.library import deformers
-from trigger.library import functions
+from ddrig.utils import parentToSurface
+from ddrig.library import deformers
+from ddrig.library import functions
 
 # transfer face guides between same topo meshes
 

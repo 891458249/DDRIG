@@ -1,18 +1,18 @@
 from maya import cmds
 from maya import mel
 import maya.api.OpenMaya as om
-from trigger.library import api, joint
-from trigger.library import functions
-from trigger.library import connection
-from trigger.library import naming
-from trigger.library import attribute
-from trigger.core.module import ModuleCore, GuidesCore
-from trigger.objects.controller import Controller
-from trigger.library.tools import make_stretchy_ik
+from ddrig.library import api, joint
+from ddrig.library import functions
+from ddrig.library import connection
+from ddrig.library import naming
+from ddrig.library import attribute
+from ddrig.core.module import ModuleCore, GuidesCore
+from ddrig.objects.controller import Controller
+from ddrig.library.tools import make_stretchy_ik
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": ["FkikRoot", "Fkik"],

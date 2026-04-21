@@ -1,7 +1,7 @@
 """Qt related Maya Utility Methods"""
 import sys
 from maya import OpenMayaUI
-from trigger.ui.Qt import QtWidgets, QtCompat
+from ddrig.ui.Qt import QtWidgets, QtCompat
 
 
 def get_main_maya_window():

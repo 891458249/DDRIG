@@ -2,9 +2,9 @@
 """Core Class for protocols."""
 import re
 from maya import cmds
-from trigger.library import api
-from trigger.library import functions
-from trigger.library import deformers
+from ddrig.library import api
+from ddrig.library import functions
+from ddrig.library import deformers
 
 
 class ProtocolCore(dict):

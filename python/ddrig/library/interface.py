@@ -1,7 +1,7 @@
 """Maya interface related methods"""
 from maya import cmds
-from trigger.core.decorators import undo
-from trigger.library import functions
+from ddrig.core.decorators import undo
+from ddrig.library import functions
 from maya.api import OpenMaya
 
 

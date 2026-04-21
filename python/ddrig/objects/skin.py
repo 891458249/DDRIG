@@ -5,13 +5,13 @@ import copy
 from maya import cmds
 import maya.api.OpenMaya as om
 import maya.api.OpenMayaAnim as omanim
-from trigger.library import api
-from trigger.library import deformers
-from trigger.core.io import IO
+from ddrig.library import api
+from ddrig.library import deformers
+from ddrig.core.io import IO
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 
 def clamp(num, min_value=0, max_value=1):
@@ -43,7 +43,7 @@ def subtractList(list_of_values):
 class Weight(object):
     def __init__(self, source=None):
         super(Weight, self).__init__()
-        self.temp_io = IO(file_name="trigger_temp_skin.json")
+        self.temp_io = IO(file_name="ddrig_temp_skin.json")
         self._is_temp_dirty = True
         self._data = None
 

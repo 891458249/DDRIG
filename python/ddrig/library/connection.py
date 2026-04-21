@@ -4,12 +4,12 @@
 import logging
 from maya.api import OpenMaya
 
-from trigger.core import validate
+from ddrig.core import validate
 
-from trigger.library import api
-from trigger.library import interface
-from trigger.library import attribute
-from trigger.library import arithmetic as op
+from ddrig.library import api
+from ddrig.library import interface
+from ddrig.library import attribute
+from ddrig.library import arithmetic as op
 from maya import cmds
 
 validate.plugin("matrixNodes")

@@ -1,5 +1,5 @@
 .. _selection_sets:
-.. |selection_sets| image:: ../../../python/trigger/ui/icons/selection_sets.png
+.. |selection_sets| image:: ../../../python/ddrig/ui/icons/selection_sets.png
 
 =====================================
 Selection Sets |selection_sets|

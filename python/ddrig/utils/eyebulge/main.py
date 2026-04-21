@@ -5,8 +5,8 @@ import logging
 
 from maya import cmds
 
-from trigger.library import attribute
-from trigger.utils.eyebulge import methodology
+from ddrig.library import attribute
+from ddrig.utils.eyebulge import methodology
 
 LOG = logging.getLogger(__name__)
 

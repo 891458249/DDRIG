@@ -1,5 +1,5 @@
 .. _morph:
-.. |morph| image:: ../../../python/trigger/ui/icons/morph.png
+.. |morph| image:: ../../../python/ddrig/ui/icons/morph.png
 
 ===========================
 Morph |morph|

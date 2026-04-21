@@ -7,9 +7,9 @@ from maya import mel
 # import logging
 import traceback
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-LOG = filelog.Filelog(logname=__name__, filename="trigger_log")
+LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 logger = logging.getLogger(__name__)
 
 

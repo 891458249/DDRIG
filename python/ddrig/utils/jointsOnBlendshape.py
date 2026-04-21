@@ -2,12 +2,12 @@
 ## create extra joint based tweaking over blendshapes
 import sys
 from maya import cmds
-from trigger.utils import parentToSurface
+from ddrig.utils import parentToSurface
 
 if sys.version_info.major == 3:
     from importlib import reload
 reload(parentToSurface)
-from trigger.library import functions
+from ddrig.library import functions
 
 
 def jointOnBlendshapes(

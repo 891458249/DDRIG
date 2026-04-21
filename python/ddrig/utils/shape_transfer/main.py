@@ -5,10 +5,10 @@ import logging
 
 from maya import cmds
 
-from trigger.library import interface
-from trigger.library import functions
-from trigger.objects.scene_data import SceneDictionary
-from trigger.utils.shape_transfer import protocols
+from ddrig.library import interface
+from ddrig.library import functions
+from ddrig.objects.scene_data import SceneDictionary
+from ddrig.utils.shape_transfer import protocols
 
 LOG = logging.getLogger(__name__)
 

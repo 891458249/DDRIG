@@ -43,28 +43,28 @@ def load_shelves(reset=False):
 
 
 def load_menu():
-    trigger_command = "from trigger.ui import main\nmain.launch()"
-    add_to_menu("Trigger", "Launch Trigger", trigger_command)
+    ddrig_command = "from ddrig.ui import main\nmain.launch()"
+    add_to_menu("DDRIG", "Launch DDRIG", ddrig_command)
 
-    selector_command = "from trigger.utils.wand import panel\npanel.dock_window(panel.MainUI)"
-    add_to_menu("Trigger", "Trigger Selector", selector_command)
+    selector_command = "from ddrig.utils.wand import panel\npanel.dock_window(panel.MainUI)"
+    add_to_menu("DDRIG", "DDRIG Selector", selector_command)
 
-    make_up_command = "from trigger.utils import makeup\nmakeup.launch()"
-    add_to_menu("Trigger", "Make Up", make_up_command)
+    make_up_command = "from ddrig.utils import makeup\nmakeup.launch()"
+    add_to_menu("DDRIG", "Make Up", make_up_command)
 
-    blendshape_transfer_command = "from trigger.utils import blendshape_transfer\nblendshape_transfer.MainUI().show()"
-    add_to_menu("Trigger", "Blendshape Transfer", blendshape_transfer_command)
+    blendshape_transfer_command = "from ddrig.utils import blendshape_transfer\nblendshape_transfer.MainUI().show()"
+    add_to_menu("DDRIG", "Blendshape Transfer", blendshape_transfer_command)
 
-    mocap_mapper_command = "import trigger.utils.mocap.ui as mocap_ui\nmocap_ui.launch()"
-    add_to_menu("Trigger", "Mocap Mapper", mocap_mapper_command)
+    mocap_mapper_command = "import ddrig.utils.mocap.ui as mocap_ui\nmocap_ui.launch()"
+    add_to_menu("DDRIG", "Mocap Mapper", mocap_mapper_command)
 
-    rom_randomizer_command = "import trigger.utils.rom_randomizer.ui as rom_randomizer_ui\nrom_randomizer_ui.launch()"
-    add_to_menu("Trigger", "ROM Randomizer", rom_randomizer_command)
+    rom_randomizer_command = "import ddrig.utils.rom_randomizer.ui as rom_randomizer_ui\nrom_randomizer_ui.launch()"
+    add_to_menu("DDRIG", "ROM Randomizer", rom_randomizer_command)
 
     # add a separator
     cmds.menuItem(divider=True)
-    recreate_command = "trigger_setup.load_shelves(reset=True)"
-    add_to_menu("Trigger", "Re-create Shelves", recreate_command)
+    recreate_command = "ddrig_setup.load_shelves(reset=True)"
+    add_to_menu("DDRIG", "Re-create Shelves", recreate_command)
 
 
 def add_to_menu(menu, menu_item, command):
@@ -73,9 +73,9 @@ def add_to_menu(menu, menu_item, command):
 
     # dont create another menu if already exists
     if cmds.menu(menu_widget, label=menu, exists=True, parent=main_window):
-        trigger_menu = '%s|%s' % (main_window, menu_widget)
+        ddrig_menu = '%s|%s' % (main_window, menu_widget)
     else:
-        trigger_menu = cmds.menu(menu_widget, label=menu, parent=main_window, tearOff=True)
+        ddrig_menu = cmds.menu(menu_widget, label=menu, parent=main_window, tearOff=True)
 
     # skip the process if the menu_item exists
     item_array = cmds.menu(menu_widget, query=True, itemArray=True)

@@ -2,19 +2,19 @@ import importlib
 from maya import cmds
 import maya.api.OpenMaya as om
 
-from trigger.core.decorators import undo
-from trigger.core import database
+from ddrig.core.decorators import undo
+from ddrig.core import database
 
-from trigger.library import functions, naming
-from trigger.library import joint
-from trigger.library import connection
-from trigger.library import attribute
+from ddrig.library import functions, naming
+from ddrig.library import joint
+from ddrig.library import connection
+from ddrig.library import attribute
 
-from trigger import modules
+from ddrig import modules
 
-from trigger.core import filelog
+from ddrig.core import filelog
 
-log = filelog.Filelog(logname=__name__, filename="trigger_log")
+log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 db = database.Database()
 
 
@@ -22,7 +22,7 @@ class Initials(object):
     def __init__(self):
         super(Initials, self).__init__()
         self.parseSettings()
-        self.projectName = "trigger"
+        self.projectName = "ddrig"
 
         self.module_dict =  {module_name: data["guide"].limb_data for module_name, data in modules.class_data.items()}
         self.valid_limbs = self.module_dict.keys()
@@ -589,7 +589,7 @@ class Initials(object):
 
     @undo
     def test_build(self, root_jnt=None, progress_bar=None):
-        kinematics = importlib.import_module("trigger.actions.kinematics")
+        kinematics = importlib.import_module("ddrig.actions.kinematics")
         if not root_jnt:
             selection = cmds.ls(selection=True)
             if len(selection) == 1:
