@@ -529,6 +529,196 @@ class Initials(object):
         else:
             cmds.setAttr("%s.%s" % (jnt, attr), value, type="string")
 
+    def rename_module(self, root_jnt, new_user_input):
+        """Rename every DAG node associated with a guide module so the scene
+        Outliner stays in sync with the user-facing module name.
+
+        Affected node pattern:
+            - Guide root joint            : ``{side}_{unique}_{member}_jInit``
+            - Guide chain descendants     : same prefix, different member
+            - Limb group (ancestor)       : ``{side}_{unique}_guides``
+            - Locators group (sibling)    : ``{side}_{unique}_locators_grp``
+            - Locator nodes               : ``loc_{guide_joint_name}``
+
+        Args:
+            root_jnt (str): Current DAG name of the guide root joint. Used
+                to locate the module.
+            new_user_input (str): New name as typed by the user. May include
+                a side token prefix (``L_`` / ``R_`` / ``C_``) or not. If
+                present it must match the module's actual side, otherwise a
+                ``ValueError`` is raised — cross-side rename is intentionally
+                refused to keep semantics simple.
+
+        Returns:
+            dict: ``{"new_module_name", "new_root_jnt", "renamed_count"}``.
+            If the normalised new name equals the existing one, the function
+            is a no-op and returns ``renamed_count = 0``.
+
+        Raises:
+            ValueError: invalid or empty input, side-token mismatch, or any
+                target name already exists in the scene on a different node.
+                On error no rename is performed — the scene is left untouched.
+        """
+        # --- Step A: normalise new_user_input into a '{side}_{core}' form ---
+        if not new_user_input or not new_user_input.strip():
+            raise ValueError("New module name is empty.")
+        new_user_input = new_user_input.strip()
+
+        old_module_name = cmds.getAttr("%s.moduleName" % root_jnt)
+        # side is embedded as the first underscore-segment of moduleName;
+        # all DDRIG module names are produced by naming.parse([name], side=side)
+        # which yields '{side}_{core}'. We use that as the authoritative source
+        # because the joint's .side enum could theoretically drift from the
+        # DAG prefix — the DAG prefix is what downstream regex relies on.
+        side = old_module_name.split("_", 1)[0]
+        if side not in ("L", "R", "C"):
+            raise ValueError(
+                "Cannot parse side from existing module name %r" % old_module_name
+            )
+
+        if new_user_input.startswith(("L_", "R_", "C_")):
+            input_side, core = new_user_input.split("_", 1)
+            if input_side != side:
+                raise ValueError(
+                    "Side token mismatch: input has %r but module is %r. "
+                    "Cross-side rename is not supported." % (input_side, side)
+                )
+        else:
+            core = new_user_input
+
+        if not core:
+            raise ValueError("New module name core part is empty.")
+        if "_" in core and any(tok in core.split("_") for tok in ("jInit", "guides", "locators", "grp")):
+            # reserved tokens inside the core would collide with the DAG suffix logic
+            raise ValueError(
+                "New module name core %r contains a reserved DDRIG token "
+                "(jInit/guides/locators/grp)." % core
+            )
+
+        new_module_name = "%s_%s" % (side, core)
+        if new_module_name == old_module_name:
+            return {
+                "new_module_name": new_module_name,
+                "new_root_jnt": root_jnt,
+                "renamed_count": 0,
+            }
+
+        # --- Step B: collect every node to rename, pinned by UUID ---
+        def _short(path):
+            return path.rsplit("|", 1)[-1]
+
+        def _uid(path):
+            result = cmds.ls(path, uuid=True)
+            if not result:
+                raise ValueError("Cannot resolve UUID for %r" % path)
+            return result[0]
+
+        old_prefix = old_module_name + "_"
+        new_prefix = new_module_name + "_"
+        nodes_to_rename = []  # list of (uuid, new_short_name)
+
+        # B.1 root joint itself
+        root_short = _short(root_jnt)
+        if not root_short.startswith(old_prefix):
+            raise ValueError(
+                "Root joint %r does not start with expected prefix %r" %
+                (root_short, old_prefix)
+            )
+        root_uuid = _uid(root_jnt)
+        nodes_to_rename.append(
+            (root_uuid, new_prefix + root_short[len(old_prefix):])
+        )
+
+        # B.2 descendant joints in the guide chain
+        descendants = cmds.listRelatives(
+            root_jnt, allDescendents=True, type="joint", fullPath=True
+        ) or []
+        for child in descendants:
+            short = _short(child)
+            if short.startswith(old_prefix):
+                nodes_to_rename.append(
+                    (_uid(child), new_prefix + short[len(old_prefix):])
+                )
+
+        # B.3 ancestor limb group + its locators_grp sibling + locator leaves
+        parent = cmds.listRelatives(root_jnt, parent=True, fullPath=True)
+        while parent:
+            parent_short = _short(parent[0])
+            if parent_short == "%s_guides" % old_module_name:
+                nodes_to_rename.append(
+                    (_uid(parent[0]), "%s_guides" % new_module_name)
+                )
+                siblings = cmds.listRelatives(
+                    parent[0], children=True, fullPath=True
+                ) or []
+                for sib in siblings:
+                    sib_short = _short(sib)
+                    if sib_short == "%s_locators_grp" % old_module_name:
+                        nodes_to_rename.append(
+                            (_uid(sib), "%s_locators_grp" % new_module_name)
+                        )
+                        loc_children = cmds.listRelatives(
+                            sib, children=True, fullPath=True
+                        ) or []
+                        loc_old_prefix = "loc_" + old_prefix
+                        loc_new_prefix = "loc_" + new_prefix
+                        for loc in loc_children:
+                            loc_short = _short(loc)
+                            if loc_short.startswith(loc_old_prefix):
+                                nodes_to_rename.append(
+                                    (_uid(loc),
+                                     loc_new_prefix + loc_short[len(loc_old_prefix):])
+                                )
+                break
+            parent = cmds.listRelatives(parent[0], parent=True, fullPath=True)
+
+        # --- Step C: pre-flight collision check ---
+        planned_names = {new for _, new in nodes_to_rename}
+        uuid_set = {uid for uid, _ in nodes_to_rename}
+        for uid, new_name in nodes_to_rename:
+            if cmds.objExists(new_name):
+                existing = cmds.ls(new_name, uuid=True)
+                if existing and existing[0] not in uuid_set:
+                    raise ValueError(
+                        "Name conflict: %r already exists in scene "
+                        "(uuid=%s). Rename aborted, no changes applied." %
+                        (new_name, existing[0])
+                    )
+        # sanity: all planned new names must be unique
+        if len(planned_names) != len(nodes_to_rename):
+            raise ValueError(
+                "Internal error: duplicate target name in plan (%d plans "
+                "but %d distinct names). Aborting." %
+                (len(nodes_to_rename), len(planned_names))
+            )
+
+        # --- Step D: execute in a single undo chunk ---
+        renamed = 0
+        cmds.undoInfo(openChunk=True, chunkName="ddrig_rename_module")
+        try:
+            for uid, new_name in nodes_to_rename:
+                current_path = cmds.ls(uid)[0]
+                cmds.rename(current_path, new_name)
+                renamed += 1
+            new_root_path = cmds.ls(root_uuid)[0]
+            cmds.setAttr(
+                "%s.moduleName" % new_root_path, new_module_name, type="string"
+            )
+        except Exception as exc:
+            # Wrap Maya errors so the UI layer only has to catch ValueError.
+            raise ValueError(
+                "Maya rename failed mid-operation: %s "
+                "(Ctrl+Z in Maya reverts the partial work)." % exc
+            )
+        finally:
+            cmds.undoInfo(closeChunk=True)
+
+        return {
+            "new_module_name": new_module_name,
+            "new_root_jnt": _short(cmds.ls(root_uuid)[0]),
+            "renamed_count": renamed,
+        }
+
     def get_extra_properties(self, module_type):
         module_type_dict = self.module_dict.get(module_type)
         if module_type_dict:
