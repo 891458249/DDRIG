@@ -186,7 +186,7 @@ class GuidesCore(object):
         tMatrix=None,
         upVector=(0, 1, 0),
         mirrorVector=(1, 0, 0),
-        lookVector=(0, 0, 1),
+        lookVector=(1, 0, 0),
         *args,
         **kwargs
     ):

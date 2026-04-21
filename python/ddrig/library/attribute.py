@@ -526,9 +526,9 @@ def attribute_pass(
 def create_global_joint_attrs(
     joint,
     moduleName=None,
-    upAxis=None,
-    mirrorAxis=None,
-    lookAxis=None,
+    upAxis=(0, 1, 0),
+    mirrorAxis=(1, 0, 0),
+    lookAxis=(1, 0, 0),
 ):
     """
     Creates DDRIG specific global attrubutes.
@@ -536,9 +536,11 @@ def create_global_joint_attrs(
     Args:
         joint: (String) Targer Joint
         moduleName: (String) Optional. Name of the module name. If none given, joint name will be used instead
-        upAxis: (Tuple) Overrides default upAxis Values for DDRIG
-        mirrorAxis: (Tuple) Overrides default mirrorAxis Values for DDRIG
-        lookAxis: (Tuple) Overrides default lookAxis Values for DDRIG
+        upAxis: (Tuple) DDRIG up axis. Defaults to (0, 1, 0).
+        mirrorAxis: (Tuple) DDRIG mirror axis (mirror plane normal).
+            Defaults to (1, 0, 0) (YZ plane mirror).
+        lookAxis: (Tuple) DDRIG look axis (joint chain forward direction).
+            Defaults to (1, 0, 0) — bone extends along +X.
 
     Returns:
 
@@ -555,21 +557,13 @@ def create_global_joint_attrs(
             cmds.addAttr(joint, ln="%sX" % attr, at="float", parent=attr)
             cmds.addAttr(joint, ln="%sY" % attr, at="float", parent=attr)
             cmds.addAttr(joint, ln="%sZ" % attr, at="float", parent=attr)
-    if upAxis:
-        _ = [
-            cmds.setAttr("%s.upAxis%s" % (joint, axis), upAxis[nmb])
-            for nmb, axis in enumerate("XYZ")
-        ]
-    if mirrorAxis:
-        _ = [
-            cmds.setAttr("%s.mirrorAxis%s" % (joint, axis), mirrorAxis[nmb])
-            for nmb, axis in enumerate("XYZ")
-        ]
-    if lookAxis:
-        _ = [
-            cmds.setAttr("%s.lookAxis%s" % (joint, axis), lookAxis[nmb])
-            for nmb, axis in enumerate("XYZ")
-        ]
+    # Signature guarantees non-None values; unconditional setAttr.
+    for nmb, axis in enumerate("XYZ"):
+        cmds.setAttr("%s.upAxis%s" % (joint, axis), upAxis[nmb])
+    for nmb, axis in enumerate("XYZ"):
+        cmds.setAttr("%s.mirrorAxis%s" % (joint, axis), mirrorAxis[nmb])
+    for nmb, axis in enumerate("XYZ"):
+        cmds.setAttr("%s.lookAxis%s" % (joint, axis), lookAxis[nmb])
 
     if not cmds.attributeQuery("useRefOri", node=joint, exists=True):
         cmds.addAttr(

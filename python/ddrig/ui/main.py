@@ -582,6 +582,9 @@ class MainUI(QtWidgets.QMainWindow):
             )
             for axis in "XYZ"
         ]
+        # DDRIG default up axis = (0, 1, 0) — Y is up.
+        for sp, val in zip(self.up_axis_sp_list, (0.0, 1.0, 0.0)):
+            sp.setValue(val)
         _ = [up_axis_hLay.addWidget(sp) for sp in self.up_axis_sp_list]
         self.module_settings_formLayout.addRow(up_axis_lbl, up_axis_hLay)
 
@@ -600,6 +603,9 @@ class MainUI(QtWidgets.QMainWindow):
             )
             for axis in "XYZ"
         ]
+        # DDRIG default mirror axis = (1, 0, 0) — mirror plane normal is X (YZ plane).
+        for sp, val in zip(self.mirror_axis_sp_list, (1.0, 0.0, 0.0)):
+            sp.setValue(val)
         _ = [mirror_axis_hLay.addWidget(sp) for sp in self.mirror_axis_sp_list]
         self.module_settings_formLayout.addRow(mirror_axis_lbl, mirror_axis_hLay)
 
@@ -616,6 +622,9 @@ class MainUI(QtWidgets.QMainWindow):
             )
             for axis in "XYZ"
         ]
+        # DDRIG default look axis = (1, 0, 0) — joint chain extends along +X.
+        for sp, val in zip(self.look_axis_sp_list, (1.0, 0.0, 0.0)):
+            sp.setValue(val)
         _ = [look_axis_hLay.addWidget(sp) for sp in self.look_axis_sp_list]
         self.module_settings_formLayout.addRow(look_axis_lbl, look_axis_hLay)
 
