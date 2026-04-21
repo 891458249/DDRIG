@@ -1,0 +1,67 @@
+# ============================================================
+# DDRIG .gitignore
+# Clean-Room independent work — excludes tooling & reference
+# ============================================================
+
+# === Workspace tooling (not part of DDRIG source) ===
+.claude/
+.remember/
+
+# === Reference-only original codebase ===
+# trigger-master/ is GPL-3.0 source by Arda Kutlu, kept solely
+# as a behavioral reference for Clean-Room specification (阶段 A).
+# Intentionally excluded from the DDRIG repository to preserve
+# independence of the new implementation.
+trigger-master/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+wheels/
+pip-log.txt
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+ENV/
+
+# === Testing / linting caches ===
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# === IDE / Editor ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Maya artifacts ===
+incrementalSave/
+*.ma.swatches/
+*.mb.swatches/
+
+# === Logs / temp ===
+*.log
+*.tmp
+*.bak
+*.orig
