@@ -288,143 +288,183 @@ class Initials(object):
 
     @undo
     def initHumanoid(self, spineSegments=3, neckSegments=3, fingers=5):
-        _, base_dict = self.initLimb("base", "center")
-        base = base_dict["C"][0]
-        cmds.select(base)
-        _, spine_dict = self.initLimb("spine", "auto", segments=spineSegments)
-        pelvis = spine_dict["C"][0]
-        cmds.setAttr("%s.ty" % pelvis, 14)
-        chest = spine_dict["C"][-1]
-        cmds.select(pelvis)
-        _, leg_dict = self.initLimb("leg", "auto")
-        cmds.select(chest)
-        _, arm_dict = self.initLimb("arm", "auto")
-        _, head_dict = self.initLimb("head", "auto", segments=neckSegments)
-        left_hand = arm_dict["L"][-1]
-        fingers = []
-        for nmb in range(5):
-            cmds.select(left_hand)
-            _, finger_dict = self.initLimb("finger", whichSide="auto", segments=3)
-            # import pdb
-            # pdb.set_trace()
-            # fingers.append(finger_dict["L"])
-            fingers.append(finger_dict)
-
-        thumb_pos_data = [
-            (1.1, 0.9, 0.25),
-            (0.8, 0.0, 0.0),
-            (0.55, 0.0, 0.00012367864829724757),
-            (0.45, 0.0, 0.0),
-        ]
-        thumb_rot_data = [
-            (31.0, 45.0, 3.0000000000000004),
-            (-1.0, -2.0, 17.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-        ]
-        index_pos_data = [
-            (2.0, 0.55, 0.0),
-            (1.0, 0.0, 0.0),
-            (0.65, 0.0, 0.0),
-            (0.6, 0.0, 0.0),
-        ]
-        index_rot_data = [
-            (1.0, 17.0, -3.0000000000000004),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-        ]
-        middle_pos_data = [
-            (2.0, -0.05, -0.09983537560644819),
-            (0.9997424668383346, 0.0, 0.0),
-            (0.7, 0.0, 0.0),
-            (0.7, 0.0, 0.0),
-        ]
-        middle_rot_data = [
-            (0.0, 7.805352401908098, -0.9999999999999998),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-        ]
-        ring_pos_data = [
-            (1.8, -0.55, -0.10011550541107042),
-            (0.95, 0.0, 0.0),
-            (0.7, 0.0, 0.0),
-            (0.6, 0.0, 0.0),
-        ]
-        ring_rot_data = [
-            (0.0, -5.0, -1.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-        ]
-        pinky_pos_data = [
-            (1.5, -1.1, 0.0),
-            (0.8, 0.0, 0.0),
-            (0.5, 0.0, 0.0),
-            (0.5, 0.0, 0.0),
-        ]
-        pinky_rot_data = [
-            (0.0, -12.000000000000002, 0.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
-        ]
-
-        for nmb, member in enumerate(fingers[0]["L"]):
-            cmds.xform(
-                member,
-                absolute=True,
-                translation=thumb_pos_data[nmb],
-                rotation=thumb_rot_data[nmb],
+        # Humanoid preset pins the canonical DDRIG axis convention regardless
+        # of the global GuidesCore defaults or db.userSettings at call time:
+        #   lookAxis   = +X  (bone chain forward)
+        #   upAxis     = +Y  (up)
+        #   mirrorAxis = +X  (mirror plane normal -> YZ plane)
+        # The Shared initLimb signature is intentionally left untouched —
+        # passing axes via **kwargs would collide with initLimb's own explicit
+        # upVector=self.upVector etc. on the Guides() constructor call
+        # (duplicate-keyword TypeError). Instead we temporarily override the
+        # Initials instance attributes that initLimb reads, and restore them
+        # in `finally` so the preset is safe even under exceptions.
+        _saved_axes = (
+            self.upVector, self.mirrorVector, self.lookVector,
+            self.upVector_asString, self.mirrorVector_asString,
+            self.lookVector_asString, self.tMatrix,
+        )
+        self.upVector = om.MVector(0, 1, 0)
+        self.mirrorVector = om.MVector(1, 0, 0)
+        self.lookVector = om.MVector(1, 0, 0)
+        self.upVector_asString = "+y"
+        self.mirrorVector_asString = "+x"
+        self.lookVector_asString = "+x"
+        # tMatrix reconstruction mirrors parseSettings():
+        #   side = up ^ look = (+Y) ^ (+X) = -Z
+        #   front = side ^ up = (-Z) ^ (+Y) = +X
+        _side = self.upVector ^ self.lookVector
+        _front = _side ^ self.upVector
+        self.tMatrix = om.MMatrix(
+            (
+                (_side.x, _side.y, _side.z, 0),
+                (self.upVector.x, self.upVector.y, self.upVector.z, 0),
+                (_front.x, _front.y, _front.z, 0),
+                (0, 0, 0, 1),
             )
-        cmds.setAttr("%s.fingerType" % fingers[0]["L"][0], 1)
-        cmds.setAttr("%s.fingerType" % fingers[0]["R"][0], 1)
+        )
+        try:
+            _, base_dict = self.initLimb("base", "center")
+            base = base_dict["C"][0]
+            cmds.select(base)
+            _, spine_dict = self.initLimb("spine", "auto", segments=spineSegments)
+            pelvis = spine_dict["C"][0]
+            cmds.setAttr("%s.ty" % pelvis, 14)
+            chest = spine_dict["C"][-1]
+            cmds.select(pelvis)
+            _, leg_dict = self.initLimb("leg", "auto")
+            cmds.select(chest)
+            _, arm_dict = self.initLimb("arm", "auto")
+            _, head_dict = self.initLimb("head", "auto", segments=neckSegments)
+            left_hand = arm_dict["L"][-1]
+            fingers = []
+            for nmb in range(5):
+                cmds.select(left_hand)
+                _, finger_dict = self.initLimb("finger", whichSide="auto", segments=3)
+                # import pdb
+                # pdb.set_trace()
+                # fingers.append(finger_dict["L"])
+                fingers.append(finger_dict)
 
-        # for nmb, member in enumerate(fingers[0]):
-        #     cmds.xform(member, absolute=True, translation=thumb_pos_data[nmb], rotation=thumb_rot_data[nmb])
-        # cmds.setAttr("%s.fingerType" % fingers[0][0], 1)
+            thumb_pos_data = [
+                (1.1, 0.9, 0.25),
+                (0.8, 0.0, 0.0),
+                (0.55, 0.0, 0.00012367864829724757),
+                (0.45, 0.0, 0.0),
+            ]
+            thumb_rot_data = [
+                (31.0, 45.0, 3.0000000000000004),
+                (-1.0, -2.0, 17.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ]
+            index_pos_data = [
+                (2.0, 0.55, 0.0),
+                (1.0, 0.0, 0.0),
+                (0.65, 0.0, 0.0),
+                (0.6, 0.0, 0.0),
+            ]
+            index_rot_data = [
+                (1.0, 17.0, -3.0000000000000004),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ]
+            middle_pos_data = [
+                (2.0, -0.05, -0.09983537560644819),
+                (0.9997424668383346, 0.0, 0.0),
+                (0.7, 0.0, 0.0),
+                (0.7, 0.0, 0.0),
+            ]
+            middle_rot_data = [
+                (0.0, 7.805352401908098, -0.9999999999999998),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ]
+            ring_pos_data = [
+                (1.8, -0.55, -0.10011550541107042),
+                (0.95, 0.0, 0.0),
+                (0.7, 0.0, 0.0),
+                (0.6, 0.0, 0.0),
+            ]
+            ring_rot_data = [
+                (0.0, -5.0, -1.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ]
+            pinky_pos_data = [
+                (1.5, -1.1, 0.0),
+                (0.8, 0.0, 0.0),
+                (0.5, 0.0, 0.0),
+                (0.5, 0.0, 0.0),
+            ]
+            pinky_rot_data = [
+                (0.0, -12.000000000000002, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            ]
 
-        for nmb, member in enumerate(fingers[1]["L"]):
-            cmds.xform(
-                member,
-                absolute=True,
-                translation=index_pos_data[nmb],
-                rotation=index_rot_data[nmb],
-            )
-        cmds.setAttr("%s.fingerType" % fingers[1]["L"][0], 2)
-        cmds.setAttr("%s.fingerType" % fingers[1]["R"][0], 2)
+            for nmb, member in enumerate(fingers[0]["L"]):
+                cmds.xform(
+                    member,
+                    absolute=True,
+                    translation=thumb_pos_data[nmb],
+                    rotation=thumb_rot_data[nmb],
+                )
+            cmds.setAttr("%s.fingerType" % fingers[0]["L"][0], 1)
+            cmds.setAttr("%s.fingerType" % fingers[0]["R"][0], 1)
 
-        for nmb, member in enumerate(fingers[2]["L"]):
-            cmds.xform(
-                member,
-                absolute=True,
-                translation=middle_pos_data[nmb],
-                rotation=middle_rot_data[nmb],
-            )
-        cmds.setAttr("%s.fingerType" % fingers[2]["L"][0], 3)
-        cmds.setAttr("%s.fingerType" % fingers[2]["R"][0], 3)
+            # for nmb, member in enumerate(fingers[0]):
+            #     cmds.xform(member, absolute=True, translation=thumb_pos_data[nmb], rotation=thumb_rot_data[nmb])
+            # cmds.setAttr("%s.fingerType" % fingers[0][0], 1)
 
-        for nmb, member in enumerate(fingers[3]["L"]):
-            cmds.xform(
-                member,
-                absolute=True,
-                translation=ring_pos_data[nmb],
-                rotation=ring_rot_data[nmb],
-            )
-        cmds.setAttr("%s.fingerType" % fingers[3]["L"][0], 4)
-        cmds.setAttr("%s.fingerType" % fingers[3]["L"][0], 4)
+            for nmb, member in enumerate(fingers[1]["L"]):
+                cmds.xform(
+                    member,
+                    absolute=True,
+                    translation=index_pos_data[nmb],
+                    rotation=index_rot_data[nmb],
+                )
+            cmds.setAttr("%s.fingerType" % fingers[1]["L"][0], 2)
+            cmds.setAttr("%s.fingerType" % fingers[1]["R"][0], 2)
 
-        for nmb, member in enumerate(fingers[4]["L"]):
-            cmds.xform(
-                member,
-                absolute=True,
-                translation=pinky_pos_data[nmb],
-                rotation=pinky_rot_data[nmb],
-            )
-        cmds.setAttr("%s.fingerType" % fingers[4]["L"][0], 5)
-        cmds.setAttr("%s.fingerType" % fingers[4]["R"][0], 5)
-        return True
+            for nmb, member in enumerate(fingers[2]["L"]):
+                cmds.xform(
+                    member,
+                    absolute=True,
+                    translation=middle_pos_data[nmb],
+                    rotation=middle_rot_data[nmb],
+                )
+            cmds.setAttr("%s.fingerType" % fingers[2]["L"][0], 3)
+            cmds.setAttr("%s.fingerType" % fingers[2]["R"][0], 3)
+
+            for nmb, member in enumerate(fingers[3]["L"]):
+                cmds.xform(
+                    member,
+                    absolute=True,
+                    translation=ring_pos_data[nmb],
+                    rotation=ring_rot_data[nmb],
+                )
+            cmds.setAttr("%s.fingerType" % fingers[3]["L"][0], 4)
+            cmds.setAttr("%s.fingerType" % fingers[3]["L"][0], 4)
+
+            for nmb, member in enumerate(fingers[4]["L"]):
+                cmds.xform(
+                    member,
+                    absolute=True,
+                    translation=pinky_pos_data[nmb],
+                    rotation=pinky_rot_data[nmb],
+                )
+            cmds.setAttr("%s.fingerType" % fingers[4]["L"][0], 5)
+            cmds.setAttr("%s.fingerType" % fingers[4]["R"][0], 5)
+            return True
+        finally:
+            (self.upVector, self.mirrorVector, self.lookVector,
+             self.upVector_asString, self.mirrorVector_asString,
+             self.lookVector_asString, self.tMatrix) = _saved_axes
 
     def adjust_guide_display(self, guide_object):
         """Adjusts the display proerties of guid joints according to the settings. Accepts guide object as input"""
