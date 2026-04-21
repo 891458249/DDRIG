@@ -1,6 +1,6 @@
 """tools to be used with ddrig rigs
 
-:created: 29 June 2020
+:created: 2025-12-29
 :author: Drafter <d891458249@gmail.com>
 """
 

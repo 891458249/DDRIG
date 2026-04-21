@@ -12,7 +12,7 @@ from _version import __version__
 # -- Project information
 
 project = 'DDRIG'
-copyright = '2023, Drafter'
+copyright = '2024-2026, Drafter'
 author = 'Drafter'
 
 # Automatically populate version and release from _version.py

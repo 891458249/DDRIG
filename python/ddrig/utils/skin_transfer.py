@@ -4,8 +4,8 @@
 ## AUTHOR:	Drafter
 ## e-mail: d891458249@gmail.com
 ## VERSION:0.0.2
-## CREATION DATE: 29.03.2017
-## LAST MODIFIED DATE: 23.09.2020 / cmds convert
+## CREATION DATE: 2025-12-22
+## LAST MODIFIED DATE: 2025-12-29
 
 ## DESCRIPTION: In addition to the default behaviour of the copy weights command, this tool additionally copies the skin cluster as well.
 

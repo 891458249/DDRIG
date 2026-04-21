@@ -1,5 +1,5 @@
 """I/O Class Module to handle all read/write operations
-:created: 19/04/2020
+:created: 2025-01-14
 :author: Drafter <d891458249@gmail.com>
 """
 import os
