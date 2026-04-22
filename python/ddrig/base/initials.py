@@ -719,6 +719,82 @@ class Initials(object):
             "renamed_count": renamed,
         }
 
+    def delete_module(self, root_jnt):
+        """Delete every DAG node belonging to a guide module.
+
+        Walks the ancestor chain of ``root_jnt`` to find the limb group
+        ``{module_name}_guides`` and deletes that whole subtree in one go
+        (guide joints, ``_locators_grp``, every ``loc_*`` leaf). If after
+        the delete the ``{projectName}_refGuides`` holder has no children
+        left, the holder is deleted too so the Outliner stays tidy.
+
+        Fallback: if no ancestor limb group is found (e.g. the joint was
+        manually reparented), only the root joint and its descendants are
+        deleted. This loses the locators group, but surfaces the anomaly
+        via ``deleted_limb_group=False`` in the return dict so the caller
+        can warn the user.
+
+        Args:
+            root_jnt (str): Current DAG name of the guide root joint.
+
+        Returns:
+            dict with keys:
+                module_name         -- ``.moduleName`` that was on the root.
+                deleted_limb_group  -- True if the ``_guides`` group was
+                                       located and removed as a whole.
+                deleted_holder      -- True if the ``{projectName}_refGuides``
+                                       holder ended up empty and was removed.
+                nodes_deleted       -- Rough count (group/joint + descendants
+                                       + holder if applicable).
+        """
+        module_name = cmds.getAttr("%s.moduleName" % root_jnt)
+        holder_name = "%s_refGuides" % self.projectName
+
+        # Locate limb group via ancestor walk (same traversal as rename_module).
+        limb_group = None
+        parent = cmds.listRelatives(root_jnt, parent=True, fullPath=True)
+        while parent:
+            parent_short = parent[0].rsplit("|", 1)[-1]
+            if parent_short == "%s_guides" % module_name:
+                limb_group = parent[0]
+                break
+            parent = cmds.listRelatives(parent[0], parent=True, fullPath=True)
+
+        cmds.undoInfo(openChunk=True, chunkName="ddrig_delete_module")
+        try:
+            if limb_group:
+                descendants = cmds.listRelatives(
+                    limb_group, allDescendents=True, fullPath=True
+                ) or []
+                nodes_deleted = 1 + len(descendants)
+                cmds.delete(limb_group)
+                deleted_limb_group = True
+            else:
+                # Fallback: no limb_group — delete the joint subtree only.
+                descendants = cmds.listRelatives(
+                    root_jnt, allDescendents=True, fullPath=True
+                ) or []
+                nodes_deleted = 1 + len(descendants)
+                cmds.delete(root_jnt)
+                deleted_limb_group = False
+
+            deleted_holder = False
+            if cmds.objExists(holder_name):
+                remaining = cmds.listRelatives(holder_name, children=True) or []
+                if not remaining:
+                    cmds.delete(holder_name)
+                    deleted_holder = True
+                    nodes_deleted += 1
+        finally:
+            cmds.undoInfo(closeChunk=True)
+
+        return {
+            "module_name": module_name,
+            "deleted_limb_group": deleted_limb_group,
+            "deleted_holder": deleted_holder,
+            "nodes_deleted": nodes_deleted,
+        }
+
     def get_extra_properties(self, module_type):
         module_type_dict = self.module_dict.get(module_type)
         if module_type_dict:

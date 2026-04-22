@@ -651,6 +651,36 @@ class MainUI(QtWidgets.QMainWindow):
         export_guides_pb.setText("Export Guides")
         button_row_lay.addWidget(export_guides_pb)
 
+        ### RIGHT CLICK MENU — Guides tab ###
+        # Context-menu and Del-key both route to the same on_guide_delete
+        # handler. QMenu kept in the local scope (class attribute causes
+        # random crashes per the Actions-tab comment below).
+        def on_context_menu_guides(point):
+            if self.guides_list_treeWidget.currentItem():
+                pop_menu_guides.exec_(
+                    self.guides_list_treeWidget.mapToGlobal(point)
+                )
+
+        pop_menu_guides = QtWidgets.QMenu()
+        self.guides_list_treeWidget.setContextMenuPolicy(
+            QtCore.Qt.CustomContextMenu
+        )
+        self.guides_list_treeWidget.customContextMenuRequested.connect(
+            on_context_menu_guides
+        )
+        self.guide_rc_delete = QtWidgets.QAction("Delete Module", self)
+        pop_menu_guides.addAction(self.guide_rc_delete)
+        self.guide_rc_delete.triggered.connect(self.on_guide_delete)
+
+        # Del key — scoped to the tree widget, not global, so it never
+        # fires while the user is editing module name / spinboxes.
+        shortcut_del_guide = QtWidgets.QShortcut(
+            QtGui.QKeySequence(QtCore.Qt.Key_Delete),
+            self.guides_list_treeWidget,
+        )
+        shortcut_del_guide.setContext(QtCore.Qt.WidgetShortcut)
+        shortcut_del_guide.activated.connect(self.on_guide_delete)
+
         ### SHORTCUTS ###
         shortcutForceUpdate = QtWidgets.QShortcut(
             QtGui.QKeySequence("F5"), self, self.force_update
@@ -1440,6 +1470,44 @@ class MainUI(QtWidgets.QMainWindow):
                 return
         # Could not find the expected item — leave the tree as-is and let
         # the user re-select manually; this is a soft failure, not a crash.
+
+    def on_guide_delete(self):
+        """Delete the currently selected guide module and every DAG node
+        associated with it. Triggered by right-click -> Delete Module or
+        by the Del key while the Guides tree has focus.
+
+        A confirmation dialog gates the destructive action; declining the
+        dialog is a no-op. On error, a warning dialog surfaces the cause
+        and the scene is left untouched (Initials.delete_module wraps the
+        work in a single Maya undo chunk)."""
+        item = self.guides_list_treeWidget.currentItem()
+        if not item:
+            return
+        root_jnt = item.text(2)
+        module_name = item.text(0)
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Module",
+            "Delete module '%s' and all its guide nodes from the scene?\n\n"
+            "This removes the limb group, guide joints, locators group and\n"
+            "locator nodes. Can be undone with Ctrl+Z." % module_name,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            result = self.guides_handler.init.delete_module(root_jnt)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Delete failed", str(exc))
+            return
+        self.populate_guides()
+        msg = "Deleted '%s' (%d nodes removed)" % (
+            result["module_name"], result["nodes_deleted"]
+        )
+        if not result["deleted_limb_group"]:
+            msg += " — note: limb group not found, joint subtree only"
+        self.statusbar.showMessage(msg, 5000)
 
     def update_properties(self, property, value):
         root_jnt = self.guides_list_treeWidget.currentItem().text(2)
