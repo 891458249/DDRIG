@@ -109,6 +109,104 @@ def launch(force=False, disable_version_control=False):
     MainUI(disable_version_control=disable_version_control).show()
 
 
+class NewNamingRuleDialog(QtWidgets.QDialog):
+    """Modal dialog for composing a new user-defined naming rule.
+
+    Fields:
+        Name, Description (free text)
+        Three rows -- one per side (L/R/C) -- each with:
+            Mode QComboBox (prefix / suffix / mid / none)
+            Token QLineEdit  (disabled when mode == 'none')
+            Separator QLineEdit, defaults to '_'  (disabled when mode == 'none')
+
+    On OK, builds a rule dict and calls naming_rules.save_rule().  Errors
+    are surfaced via QMessageBox and keep the dialog open so the user can
+    fix the input.
+    """
+
+    def __init__(self, parent=None):
+        super(NewNamingRuleDialog, self).__init__(parent)
+        self.setWindowTitle("New Naming Rule")
+        self.setMinimumWidth(460)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form = QtWidgets.QFormLayout()
+        self.name_le = QtWidgets.QLineEdit()
+        self.name_le.setPlaceholderText("e.g. My Studio Rule")
+        self.desc_le = QtWidgets.QLineEdit()
+        self.desc_le.setPlaceholderText("optional")
+        form.addRow("Name", self.name_le)
+        form.addRow("Description", self.desc_le)
+        layout.addLayout(form)
+
+        sides_box = QtWidgets.QGroupBox("Per-side configuration")
+        sides_grid = QtWidgets.QGridLayout(sides_box)
+        sides_grid.addWidget(QtWidgets.QLabel("Side"),       0, 0)
+        sides_grid.addWidget(QtWidgets.QLabel("Mode"),       0, 1)
+        sides_grid.addWidget(QtWidgets.QLabel("Token"),      0, 2)
+        sides_grid.addWidget(QtWidgets.QLabel("Separator"),  0, 3)
+
+        self.side_rows = {}
+        default_tokens = {"L": "L", "R": "R", "C": "C"}
+        for row_idx, side in enumerate(("L", "R", "C"), start=1):
+            sides_grid.addWidget(QtWidgets.QLabel(side), row_idx, 0)
+            mode_cb = QtWidgets.QComboBox()
+            mode_cb.addItems(["prefix", "suffix", "mid", "none"])
+            token_le = QtWidgets.QLineEdit(default_tokens[side])
+            sep_le = QtWidgets.QLineEdit("_")
+            sep_le.setMaxLength(3)
+            sides_grid.addWidget(mode_cb, row_idx, 1)
+            sides_grid.addWidget(token_le, row_idx, 2)
+            sides_grid.addWidget(sep_le, row_idx, 3)
+            self.side_rows[side] = (mode_cb, token_le, sep_le)
+            mode_cb.currentTextChanged.connect(
+                lambda mode, s=side: self._on_mode_changed(s, mode)
+            )
+        layout.addWidget(sides_box)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._on_ok)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_mode_changed(self, side, mode):
+        _, token_le, sep_le = self.side_rows[side]
+        enabled = mode != "none"
+        token_le.setEnabled(enabled)
+        sep_le.setEnabled(enabled)
+
+    def _collect_rule(self):
+        rule = {
+            "name": self.name_le.text().strip(),
+            "description": self.desc_le.text().strip(),
+            "sides": {},
+        }
+        for side, (mode_cb, token_le, sep_le) in self.side_rows.items():
+            mode = mode_cb.currentText()
+            cfg = {"mode": mode}
+            if mode != "none":
+                cfg["token"] = token_le.text().strip()
+                sep = sep_le.text() or "_"
+                cfg["separator"] = sep
+            rule["sides"][side] = cfg
+        return rule
+
+    def _on_ok(self):
+        from ddrig.library import naming_rules
+        rule = self._collect_rule()
+        try:
+            naming_rules.save_rule(rule)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        self.accept()
+
+
 class MainUI(QtWidgets.QMainWindow):
     iconsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "icons")
 
@@ -1644,15 +1742,14 @@ class MainUI(QtWidgets.QMainWindow):
         )
 
     def on_naming_new_rule(self):
-        """Placeholder hook -- the dialog implementation lands in a
-        follow-up commit.  For now, surface a notice instead of silently
-        doing nothing, so the button's presence is not misleading."""
-        QtWidgets.QMessageBox.information(
-            self,
-            "New Naming Rule",
-            "The rule-creation dialog is not yet available in this build. "
-            "A follow-up commit adds it.",
-        )
+        """Open the NewNamingRuleDialog; on accept, refresh the combo so
+        the newly-saved rule appears and is selectable."""
+        dialog = NewNamingRuleDialog(self)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            self._refresh_naming_rule_combo()
+            self.statusbar.showMessage(
+                "New naming rule created.", 5000
+            )
 
     def on_naming_delete_rule(self):
         from ddrig.library import naming_rules
