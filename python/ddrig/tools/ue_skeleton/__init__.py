@@ -18,9 +18,11 @@ from ddrig.tools.ue_skeleton.builder import (
     UE_ROOT,
     UE_SUFFIX,
     JDEF_SUFFIX,
+    GUIDE_SUFFIX,
     build_ue_skeleton,
     delete_ue_skeleton,
     rebuild_ue_skeleton,
+    module_status_snapshot,
 )
 from ddrig.tools.ue_skeleton.skin_swap import transfer_skin_to_ue
 
@@ -29,8 +31,10 @@ __all__ = [
     "UE_ROOT",
     "UE_SUFFIX",
     "JDEF_SUFFIX",
+    "GUIDE_SUFFIX",
     "build_ue_skeleton",
     "delete_ue_skeleton",
     "rebuild_ue_skeleton",
+    "module_status_snapshot",
     "transfer_skin_to_ue",
 ]

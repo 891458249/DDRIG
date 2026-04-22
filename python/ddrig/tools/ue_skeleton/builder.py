@@ -1,44 +1,52 @@
-"""Build a parallel UE-compatible skeleton from DDRIG's flat deform joints.
+"""Build a parallel UE-compatible skeleton -- guide-first, rig-optional.
 
 Overview
 --------
 
-    Flat layout (left untouched):              Hierarchical UE copy (new):
-    ---------------------------                -------------------------------
-    ddrig_grp/                                 ue_skeleton_grp/
-      L_arm_grp/                                 root_jUE
-        L_arm_defJoints_grp/                       C_spine_pelvis_jUE
-          L_arm_collar_jDef                          C_spine_0_jUE
-          L_arm_up_0_jDef                              ...
-          ...                                           L_arm_collar_jUE
-          L_arm_hand_jDef                                 L_arm_up_0_jUE
-                                                            ...
-                                                              L_arm_hand_jUE
+DDRIG's deform joints (`_jDef`) form a flat layout optimised for Maya's
+matrix math.  UE / Unity require a single-root hierarchical skeleton,
+so this tool generates a PARALLEL skeleton of `_jUE` joints with proper
+parent-child topology, driven (where possible) by parent+scale
+constraints from the original `_jDef`.
 
-Each ``_jUE`` carries a parent + scale constraint from its source ``_jDef``
-so animation plays through identically.  ``segmentScaleCompensate`` is
-forced off (UE is not compatible with Maya's default True).
+Two orthogonal axes shape the output:
 
-Algorithm summary
------------------
+    source       = "guide" | "rig" | "auto"
+    granularity  = "main"  | "full"
 
-1. Collect modules via ``Initials.get_scene_roots`` plus, per module,
-   every ``_jDef`` under ``{module_name}_defJoints_grp``.
-2. Bucket each ``_jDef`` to its closest guide joint by world distance.
-3. Flatten buckets into one jDef chain per module (depth-first over
-   guide chain; within each bucket sort along the prev->next guide
-   axis when possible).
-4. Duplicate each jDef as a jUE, chaining them inside the module.
-5. Walk the guide's DAG-parent chain to find each module's "attach to
-   this other module" relationship; parent each module's head jUE to
-   the closest jUE in that other module's chain.  Top-level modules
-   (whose guide root has no joint ancestor) parent to ``root_jUE``.
-6. Add parent + scale constraint (source ``_jDef`` -> target ``_jUE``).
+source
+    guide  Topology and world positions come from guide joints (`_jInit`)
+           only.  No animation drivers.  Works even if NO module has
+           been built yet.
 
-Public API
-----------
+    rig    Each module must have an `_defJoints_grp` populated with
+           `_jDef` joints.  Positions + parent/scale constraints come
+           from the `_jDef`.  Unbuilt modules are skipped (with warning).
 
-``build_ue_skeleton``, ``rebuild_ue_skeleton``, ``delete_ue_skeleton``
+    auto   Per-module adaptive: use rig when available, fall back to
+           guide for unbuilt modules.  Recommended default; never
+           skips a module.
+
+granularity
+    main   One `_jUE` per guide joint (e.g. arm = 4: collar / shoulder
+           / elbow / hand).  Works for every source.
+
+    full   In addition to the main joints, insert every twist / ribbon
+           `_jDef` that lies between two consecutive guide joints on
+           the segment axis (e.g. arm = 13: collar / up_0..up_4 /
+           elbow / low_0..low_4 / hand).  Requires rig data; for
+           guide-sourced modules silently degrades to main.
+
+Key invariants
+--------------
+* Only the `ue_skeleton_grp` subtree is touched.  Source `_jDef`,
+  `defJoints_grp`, skin clusters and guide joints are never modified.
+* Each `_jUE` carries a `sourceJDef` string attribute pointing to its
+  driving `_jDef` (empty when static).  skin_swap uses this map to
+  transfer weights without guessing names.
+* Repeat-safe: `rebuild_ue_skeleton` is `delete_ue_skeleton + build_ue_skeleton`.
+* Unbuilt modules do NOT break the cross-module chain -- their
+  jUEs are created from guide positions and the chain remains intact.
 """
 from __future__ import annotations
 
@@ -52,9 +60,18 @@ log = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 UE_SUFFIX = "_jUE"
 JDEF_SUFFIX = "_jDef"
+GUIDE_SUFFIX = "_jInit"
 UE_GROUP = "ue_skeleton_grp"
 UE_ROOT = "root_jUE"
 _SOURCE_ATTR = "sourceJDef"
+
+_VALID_SOURCES = ("guide", "rig", "auto")
+_VALID_GRANULARITIES = ("main", "full")
+
+# Placeholder used in the intra-module sequence for "parent is in another
+# module" -- resolved in the cross-module pass after every module's
+# intra-chain is built.
+_CROSS_MODULE_PLACEHOLDER = "@cross_module_parent"
 
 
 # ---------------------------------------------------------------------------
@@ -67,15 +84,14 @@ def _short(name):
 
 
 def _world_pos(node):
-    """Return world translation of ``node`` as an MVector."""
+    """World-space translation of ``node`` as an MVector."""
     t = cmds.xform(node, query=True, worldSpace=True, translation=True)
     return om.MVector(t[0], t[1], t[2])
 
 
 def _find_parent_joint(node):
     """Walk up the DAG from ``node`` and return the first joint ancestor
-    (short name).  Returns ``None`` if no joint ancestor exists -- that
-    indicates a top-level module."""
+    short name, or ``None`` if no joint ancestor exists."""
     parent = cmds.listRelatives(node, parent=True, fullPath=True)
     while parent:
         p = parent[0]
@@ -85,70 +101,135 @@ def _find_parent_joint(node):
     return None
 
 
-def _jdef_to_jue_name(jdef_short, suffix):
-    """Map a ``*_jDef`` short name to its ``*_jUE`` counterpart."""
-    jdef_short = _short(jdef_short)
-    if jdef_short.endswith(JDEF_SUFFIX):
-        return jdef_short[:-len(JDEF_SUFFIX)] + suffix
-    return jdef_short + suffix
+def _guide_to_jue_name(guide_name, suffix):
+    """`L_arm_collar_jInit` -> `L_arm_collar_jUE`."""
+    guide_name = _short(guide_name)
+    if guide_name.endswith(GUIDE_SUFFIX):
+        return guide_name[:-len(GUIDE_SUFFIX)] + suffix
+    return guide_name + suffix
+
+
+def _guide_to_jdef_name(guide_name):
+    """`L_arm_collar_jInit` -> `L_arm_collar_jDef`, or ``None`` if the
+    guide name does not carry the expected suffix."""
+    guide_name = _short(guide_name)
+    if guide_name.endswith(GUIDE_SUFFIX):
+        return guide_name[:-len(GUIDE_SUFFIX)] + JDEF_SUFFIX
+    return None
+
+
+def _jdef_to_jue_name(jdef_name, suffix):
+    """`L_arm_up_0_jDef` -> `L_arm_up_0_jUE`."""
+    jdef_name = _short(jdef_name)
+    if jdef_name.endswith(JDEF_SUFFIX):
+        return jdef_name[:-len(JDEF_SUFFIX)] + suffix
+    return jdef_name + suffix
+
+
+def _module_defgrp_name(module_name):
+    """{module_name}_defJoints_grp -- the convention from core/module.py:143."""
+    return "%s_defJoints_grp" % module_name
+
+
+def _module_has_rig(module_name):
+    """True iff the module has a populated `_defJoints_grp` with at
+    least one `_jDef` inside."""
+    grp = _module_defgrp_name(module_name)
+    if not cmds.objExists(grp):
+        return False
+    children = cmds.listRelatives(
+        grp, allDescendents=True, type="joint"
+    ) or []
+    return any(c.endswith(JDEF_SUFFIX) for c in children)
+
+
+def _module_jdefs(module_name):
+    """All `_jDef` joints under the module's `_defJoints_grp` (short
+    names).  Empty list if the module has no built rig."""
+    grp = _module_defgrp_name(module_name)
+    if not cmds.objExists(grp):
+        return []
+    children = cmds.listRelatives(
+        grp, allDescendents=True, type="joint"
+    ) or []
+    return [c for c in children if c.endswith(JDEF_SUFFIX)]
 
 
 # ---------------------------------------------------------------------------
-# Module discovery
+# Module / guide topology collection
 # ---------------------------------------------------------------------------
+
+def _guide_chain_for_module(guide_root, module_root_set):
+    """Preorder-DFS traversal starting at ``guide_root``, stopping at
+    any joint that belongs to ANOTHER module (i.e. another entry in
+    ``module_root_set``).  Returns an ordered list of joint short names.
+
+    Also returns a ``{child: parent}`` dict limited to the in-module
+    pairs, so callers can reconstruct edges for twist insertion.
+    """
+    chain = [guide_root]
+    parent_map = {}
+
+    def _walk(node):
+        children = cmds.listRelatives(
+            node, children=True, type="joint", fullPath=False
+        ) or []
+        for c in children:
+            if c in module_root_set and c != guide_root:
+                # Another module's root -- stop.  That child is the
+                # concern of its own module entry.
+                continue
+            chain.append(c)
+            parent_map[c] = node
+            _walk(c)
+
+    _walk(guide_root)
+    return chain, parent_map
+
 
 def _collect_modules():
-    """Return a list of per-module dicts containing everything the
-    build pipeline needs:
+    """Return per-module info required by the build pipeline.
+
+    Each entry::
 
         {
-            "info": <get_scene_roots entry>,
-            "guide_root": <short name>,
-            "guide_chain": [guide_root, ...depth-first descendants],
-            "jdefs": [<short name>, ...],
+            "info":          <get_scene_roots entry verbatim>,
+            "guide_root":    <short name>,
+            "guide_chain":   [root, ...DFS descendants, stopping at other module roots],
+            "guide_parent_map": {child_guide: parent_guide, ...}  (in-module only),
+            "has_rig":       bool,
+            "jdefs":         [all jDef short names under the module's defJointsGrp],
         }
     """
-    # Lazy import: ddrig.base.initials cascades into Qt.  Deferring to
-    # call time keeps ``ddrig.tools.ue_skeleton.builder`` import-clean in
-    # environments that do not yet have Qt available (e.g. hot-reload).
+    # Lazy import: Initials cascades through Qt; keep this file standalone-importable.
     from ddrig.base import initials
-    init = initials.Initials()
-    scene_roots = init.get_scene_roots()
+    scene_roots = initials.Initials().get_scene_roots()
     if not scene_roots:
         raise RuntimeError(
-            "No DDRIG guide roots found in the scene. Build a rig first."
+            "No DDRIG guide roots found in the scene.  Create some guides first."
         )
+
+    module_root_set = {r["root_joint"] for r in scene_roots}
 
     modules = []
     for info in scene_roots:
         guide_root = info["root_joint"]
         module_name = info["module_name"]
-        descendants = cmds.listRelatives(
-            guide_root, allDescendents=True, type="joint", fullPath=False
-        ) or []
-        guide_chain = [guide_root] + list(descendants)
-
-        # Harvest jDefs from this module's defJoints_grp.
-        def_grp = "%s_defJoints_grp" % module_name
-        jdefs = []
-        if cmds.objExists(def_grp):
-            under = cmds.listRelatives(
-                def_grp, allDescendents=True, type="joint", fullPath=False
-            ) or []
-            jdefs = [j for j in under if j.endswith(JDEF_SUFFIX)]
-
+        chain, parent_map = _guide_chain_for_module(guide_root, module_root_set)
         modules.append({
             "info": info,
             "guide_root": guide_root,
-            "guide_chain": guide_chain,
-            "jdefs": jdefs,
+            "guide_chain": chain,
+            "guide_parent_map": parent_map,
+            "has_rig": _module_has_rig(module_name),
+            "jdefs": _module_jdefs(module_name),
         })
     return modules
 
 
 def _find_module_of_guide(guide_short, modules):
-    """Return the module_name whose guide_chain contains ``guide_short``,
-    or ``None``."""
+    """Return the ``module_name`` whose guide_chain contains
+    ``guide_short``, or ``None``."""
     for m in modules:
         if guide_short in m["guide_chain"]:
             return m["info"]["module_name"]
@@ -156,96 +237,99 @@ def _find_module_of_guide(guide_short, modules):
 
 
 # ---------------------------------------------------------------------------
-# jDef -> guide bucket assignment + chain flattening
+# Twist jDef placement
 # ---------------------------------------------------------------------------
 
-def _bucket_jdefs_by_closest_guide(jdefs, guide_chain):
-    """Assign each jDef to its closest guide (world-space Euclidean).
-
-    Returns ``{guide_short: [(distance, jdef_short), ...]}`` with each
-    bucket sorted by distance ascending.  A guide with no jDefs in it
-    still appears in the dict with an empty list.
+def _partition_jdefs(guide_chain, all_jdefs):
+    """Split a module's `_jDef` list into:
+        * ``main_jdef_of_guide`` : {guide_short: jdef_short}  for guides
+                                   whose naming counterpart exists.
+        * ``twist_jdefs``        : jDefs that do not match any guide
+                                   (ribbon / sub-chain deform joints).
     """
-    bucket = {g: [] for g in guide_chain}
-    if not jdefs or not guide_chain:
-        return bucket
-    guide_positions = {g: _world_pos(g) for g in guide_chain}
-    for jdef in jdefs:
-        jp = _world_pos(jdef)
-        best_g, best_d = None, float("inf")
-        for g, gp in guide_positions.items():
-            d = (gp - jp).length()
-            if d < best_d:
-                best_d, best_g = d, g
-        if best_g is not None:
-            bucket[best_g].append((best_d, jdef))
-    for g in bucket:
-        bucket[g].sort(key=lambda t: t[0])
-    return bucket
+    expected = {}
+    for g in guide_chain:
+        candidate = _guide_to_jdef_name(g)
+        if candidate:
+            expected[candidate] = g
+    main_of = {}
+    jdef_set = set(all_jdefs)
+    for jd in all_jdefs:
+        if jd in expected:
+            main_of[expected[jd]] = jd
+    twist = [jd for jd in all_jdefs if jd not in main_of.values()]
+    return main_of, twist
 
 
-def _order_bucket_along_axis(bucket_entries, prev_guide, current_guide, next_guide):
-    """Sort a bucket's jDefs by projection onto the axis connecting
-    prev_guide -> next_guide (or any adjacent pair we have).  Falls back
-    to the pre-computed distance-to-current-guide order when the axis
-    is degenerate (zero length)."""
-    if not bucket_entries:
+def _twist_jdefs_between(guide_a, guide_b, twist_jdefs):
+    """Return twist jDefs whose world position projects into the open
+    interval (0, 1) of the parameter t along segment a->b.
+
+    Ordering: by t ascending.  Projection is the scalar
+    ``t = ((p - a) . (b - a)) / |b - a|^2``.
+    """
+    pa = _world_pos(guide_a)
+    pb = _world_pos(guide_b)
+    axis = pb - pa
+    len_sq = axis * axis
+    if len_sq < 1e-12:
         return []
-    if prev_guide and next_guide:
-        p0 = _world_pos(prev_guide)
-        p1 = _world_pos(next_guide)
-    elif prev_guide:
-        p0 = _world_pos(prev_guide)
-        p1 = _world_pos(current_guide)
-    elif next_guide:
-        p0 = _world_pos(current_guide)
-        p1 = _world_pos(next_guide)
-    else:
-        # Sole guide in chain -- keep the precomputed distance order.
-        return [jd for _, jd in bucket_entries]
-
-    axis = p1 - p0
-    length = axis.length()
-    if length < 1e-6:
-        return [jd for _, jd in bucket_entries]
-    axis = axis / length
-
-    def projection(jdef):
-        return (_world_pos(jdef) - p0) * axis
-
-    return sorted((jd for _, jd in bucket_entries), key=projection)
-
-
-def _flatten_module_chain(jdefs, guide_chain):
-    """Produce the ordered jDef chain for a module by sweeping through
-    the guide chain in order and laying each guide's bucket along the
-    previous->next guide axis."""
-    bucket = _bucket_jdefs_by_closest_guide(jdefs, guide_chain)
-    chain = []
-    for i, g in enumerate(guide_chain):
-        prev_g = guide_chain[i - 1] if i > 0 else None
-        next_g = guide_chain[i + 1] if i + 1 < len(guide_chain) else None
-        ordered = _order_bucket_along_axis(bucket[g], prev_g, g, next_g)
-        chain.extend(ordered)
-    return chain
+    picks = []
+    for jd in twist_jdefs:
+        pj = _world_pos(jd)
+        t = ((pj - pa) * axis) / len_sq
+        if 0.0 < t < 1.0:
+            picks.append((t, jd))
+    picks.sort(key=lambda x: x[0])
+    return [jd for _, jd in picks]
 
 
 # ---------------------------------------------------------------------------
-# jUE node creation
+# jUE creation primitives
 # ---------------------------------------------------------------------------
 
-def _create_jue_joint(jdef, jue_name, parent_jue=None):
-    """Duplicate a jDef as a fresh joint (no shapes, no children, no
-    incoming connections), optionally parent under ``parent_jue``, force
-    segmentScaleCompensate off, and tag the sourceJDef attribute for
-    later skin-swap lookup.
+def _create_static_jue(from_node, jue_name, parent_jue=None):
+    """Create a jUE that copies ``from_node``'s world transform verbatim.
 
-    Returns the actual short name Maya assigned (may be uniquified)."""
+    Used when the source is a guide joint (no driver available) or any
+    other static reference.  Returns the short name actually created
+    (may be uniquified by Maya)."""
+    cmds.select(clear=True)
+    # duplicate gives us joint orient + radius for free and drops any
+    # inbound connections from matrixConstraints etc.
+    dup = cmds.duplicate(from_node, parentOnly=True, name=jue_name)[0]
+    dup_short = _short(dup)
+    try:
+        cmds.parent(dup_short, world=True)
+    except RuntimeError:
+        pass
+    # Overwrite transform to match from_node exactly, just in case the
+    # duplicate inherited some transform we did not want.
+    matrix = cmds.xform(from_node, query=True, worldSpace=True, matrix=True)
+    cmds.xform(dup_short, worldSpace=True, matrix=matrix)
+    try:
+        cmds.setAttr("%s.segmentScaleCompensate" % dup_short, 0)
+    except RuntimeError:
+        pass
+    # sourceJDef tag: empty string means "static; no driving _jDef".
+    if not cmds.attributeQuery(_SOURCE_ATTR, node=dup_short, exists=True):
+        cmds.addAttr(dup_short, longName=_SOURCE_ATTR, dataType="string")
+    cmds.setAttr("%s.%s" % (dup_short, _SOURCE_ATTR), "", type="string")
+    if parent_jue and cmds.objExists(parent_jue):
+        try:
+            cmds.parent(dup_short, parent_jue)
+        except RuntimeError as exc:
+            log.warning("UE skeleton: parent %s under %s failed: %s" %
+                        (dup_short, parent_jue, exc))
+    return dup_short
+
+
+def _create_driven_jue(jdef, jue_name, parent_jue=None):
+    """Create a jUE at ``jdef``'s world transform, tag it with
+    ``sourceJDef = jdef``.  Returns the short name actually created."""
     cmds.select(clear=True)
     dup = cmds.duplicate(jdef, parentOnly=True, name=jue_name)[0]
     dup_short = _short(dup)
-    # Strip any residual parent from the duplicate (duplicate keeps the
-    # source's parent by default).
     try:
         cmds.parent(dup_short, world=True)
     except RuntimeError:
@@ -254,7 +338,6 @@ def _create_jue_joint(jdef, jue_name, parent_jue=None):
         cmds.setAttr("%s.segmentScaleCompensate" % dup_short, 0)
     except RuntimeError:
         pass
-    # Record the source jDef on the jUE so skin-swap can map back.
     if not cmds.attributeQuery(_SOURCE_ATTR, node=dup_short, exists=True):
         cmds.addAttr(dup_short, longName=_SOURCE_ATTR, dataType="string")
     cmds.setAttr("%s.%s" % (dup_short, _SOURCE_ATTR), jdef, type="string")
@@ -268,8 +351,8 @@ def _create_jue_joint(jdef, jue_name, parent_jue=None):
 
 
 def _mirror_animation(jdef, jue):
-    """Attach a parent + scale constraint from ``jdef`` to ``jue`` so
-    the UE joint follows the DDRIG deform joint at every frame."""
+    """Attach parent+scale constraints from ``jdef`` -> ``jue`` so the
+    UE joint follows the DDRIG deform joint every frame."""
     try:
         cmds.parentConstraint(jdef, jue, maintainOffset=False)
     except RuntimeError as exc:
@@ -278,9 +361,101 @@ def _mirror_animation(jdef, jue):
     try:
         cmds.scaleConstraint(jdef, jue, maintainOffset=False)
     except RuntimeError:
-        # parent-only is still usable; log and keep going.
         pass
     return True
+
+
+# ---------------------------------------------------------------------------
+# Module sequence planning
+# ---------------------------------------------------------------------------
+
+def _plan_module_sequence(module, use_rig, granularity, suffix):
+    """Produce an ordered list of jUE creation records for one module.
+
+    Each record is a dict::
+
+        {
+            "jue_name":  <desired short name>,
+            "pos_src":   <node whose world transform to duplicate from>,
+            "parent_ref": <previous jUE short name> OR _CROSS_MODULE_PLACEHOLDER,
+            "drive":     <jdef short name> OR None (for static jUE),
+            "guide_src": <guide short name> OR None (main jUEs only),
+        }
+
+    The order is "root first"; creating them in order respects parent
+    references within the same module.
+    """
+    guide_chain = module["guide_chain"]
+    guide_parent_map = module["guide_parent_map"]
+    main_jdef_of_guide, twist_jdefs = _partition_jdefs(
+        guide_chain, module["jdefs"] if use_rig else []
+    )
+
+    sequence = []
+    guide_to_jue_in_module = {}  # guide -> jue_name within this module
+
+    for g in guide_chain:
+        parent_g = guide_parent_map.get(g)
+
+        # ---- Twist insertion between parent_g and g (Full + rig only) ---
+        incoming_parent_jue = None
+        if parent_g is None:
+            incoming_parent_jue = _CROSS_MODULE_PLACEHOLDER
+        else:
+            incoming_parent_jue = guide_to_jue_in_module[parent_g]
+            if granularity == "full" and use_rig:
+                twists = _twist_jdefs_between(parent_g, g, twist_jdefs)
+                for twist_jd in twists:
+                    twist_jue = _jdef_to_jue_name(twist_jd, suffix)
+                    sequence.append({
+                        "jue_name": twist_jue,
+                        "pos_src": twist_jd,
+                        "parent_ref": incoming_parent_jue,
+                        "drive": twist_jd,
+                        "guide_src": None,
+                    })
+                    incoming_parent_jue = twist_jue
+
+        # ---- Main jUE for this guide ------------------------------------
+        main_jdef = main_jdef_of_guide.get(g) if use_rig else None
+        if main_jdef and cmds.objExists(main_jdef):
+            pos_src = main_jdef
+            drive = main_jdef
+        else:
+            pos_src = g
+            drive = None
+        jue_name = _guide_to_jue_name(g, suffix)
+        sequence.append({
+            "jue_name": jue_name,
+            "pos_src": pos_src,
+            "parent_ref": incoming_parent_jue,
+            "drive": drive,
+            "guide_src": g,
+        })
+        guide_to_jue_in_module[g] = jue_name
+
+    return sequence
+
+
+def _per_module_source_decision(module, source):
+    """Return (use_rig: bool, skip: bool, note: str) for the module.
+
+    * source="guide": always use guide.
+    * source="rig":   require rig; if missing -> skip.
+    * source="auto":  use rig if present, else guide.
+    """
+    has_rig = module["has_rig"]
+    module_name = module["info"]["module_name"]
+    if source == "guide":
+        return False, False, "guide-sourced"
+    if source == "rig":
+        if has_rig:
+            return True, False, "rig-sourced"
+        return False, True, "no rig; skipped (source=rig)"
+    # auto
+    if has_rig:
+        return True, False, "rig-sourced (auto)"
+    return False, False, "guide-sourced (auto fallback; module not built)"
 
 
 # ---------------------------------------------------------------------------
@@ -288,43 +463,61 @@ def _mirror_animation(jdef, jue):
 # ---------------------------------------------------------------------------
 
 def delete_ue_skeleton(group_name=UE_GROUP):
-    """Remove the UE skeleton group and everything under it.
-
-    Constraints that drive the jUE joints live on the jUE nodes themselves,
-    so deleting the group tears them down with it.  Source jDefs are
-    untouched.
-
-    Returns:
-        bool: True if something was removed, False if the group did not
-        exist.
-    """
+    """Remove the UE skeleton group and everything beneath it.  Source
+    `_jDef`, guides, and skin clusters are untouched.  Returns True if
+    something was removed."""
     if cmds.objExists(group_name):
         cmds.delete(group_name)
         return True
     return False
 
 
-def build_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP, suffix=UE_SUFFIX):
-    """Build a parallel UE-compatible skeleton mirroring all ``_jDef``
-    deform joints in the scene.
+def build_ue_skeleton(
+    source="auto",
+    granularity="main",
+    root_name=UE_ROOT,
+    group_name=UE_GROUP,
+    suffix=UE_SUFFIX,
+):
+    """Build a parallel UE-compatible skeleton.
 
-    See the module docstring for the algorithm.  Refuses to run if
-    ``group_name`` already exists; call :func:`rebuild_ue_skeleton` to
-    wipe and rebuild.
+    Args:
+        source: ``"guide"`` | ``"rig"`` | ``"auto"`` -- see module docstring.
+        granularity: ``"main"`` | ``"full"`` -- see module docstring.
+        root_name: short name for the single root joint.
+        group_name: short name for the container group.
+        suffix: suffix applied to all jUE joints (default ``_jUE``).
 
     Returns:
-        dict with keys:
-            root             -- the ``root_jUE`` joint short name.
-            group            -- the ``ue_skeleton_grp`` transform.
-            created          -- list of jUE short names, in creation order.
-            skipped          -- list of ``(item, reason)`` tuples.
-            module_chains    -- ``{module_name: [jue_short, ...]}``.
-            jdef_to_jue      -- ``{jdef_short: jue_short}``.
+        dict with keys::
+
+            {
+                "root":           <root_jue>,
+                "group":          <group>,
+                "created":        [<jue short names in creation order>],
+                "skipped":        [(item, reason), ...],
+                "module_chains":  {module_name: [jue_short, ...]},
+                "module_status":  {module_name: "rig-sourced" | "guide-sourced"
+                                                 | "skipped: ..."},
+                "jdef_to_jue":    {jdef_short: jue_short},
+                "source":         <echoed>,
+                "granularity":    <echoed>,
+            }
 
     Raises:
-        RuntimeError: if no guide roots exist (no DDRIG rig in scene) or
-            the target group name is already taken.
+        RuntimeError: no guide roots in the scene, or ``group_name``
+            already exists (caller should use ``rebuild_ue_skeleton``).
+        ValueError: invalid source / granularity.
     """
+    if source not in _VALID_SOURCES:
+        raise ValueError(
+            "source must be one of %s, got %r" % (_VALID_SOURCES, source)
+        )
+    if granularity not in _VALID_GRANULARITIES:
+        raise ValueError(
+            "granularity must be one of %s, got %r" %
+            (_VALID_GRANULARITIES, granularity)
+        )
     if cmds.objExists(group_name):
         raise RuntimeError(
             "%r already exists. Use rebuild_ue_skeleton() or "
@@ -333,7 +526,7 @@ def build_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP, suffix=UE_SUFFIX):
 
     modules = _collect_modules()
 
-    # Pre-create the holder group + root joint.
+    # Holder group + single root joint
     group = cmds.group(empty=True, name=group_name)
     cmds.select(clear=True)
     ue_root = cmds.joint(name=root_name)
@@ -344,94 +537,97 @@ def build_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP, suffix=UE_SUFFIX):
     except RuntimeError:
         pass
 
-    module_chains = {}   # module_name -> [jue short names in chain order]
+    module_chains = {}   # module_name -> [jue short names]
+    module_status = {}   # module_name -> status label for log
     jdef_to_jue = {}     # jdef short -> jue short
-    jue_to_jdef = {}     # jue short  -> jdef short  (for pass 3 constraint)
+    jue_to_drive = {}    # jue short -> driving jdef (for pass 3 constraints)
     created = []
     skipped = []
 
-    # Pass 1: per-module intra-chain (linear jUE chain, no cross-module
-    # parenting yet).
+    # ------- Pass 1: per-module intra-chain ---------------------------------
     for m in modules:
         mod_name = m["info"]["module_name"]
-        chain_jdefs = _flatten_module_chain(m["jdefs"], m["guide_chain"])
-        if not chain_jdefs:
-            skipped.append((mod_name, "no jDefs found under %s_defJoints_grp"
-                            % mod_name))
+        use_rig, skip_flag, note = _per_module_source_decision(m, source)
+        module_status[mod_name] = note
+        if skip_flag:
+            module_chains[mod_name] = []
+            skipped.append((mod_name, note))
+            continue
+
+        sequence = _plan_module_sequence(m, use_rig, granularity, suffix)
+        if not sequence:
             module_chains[mod_name] = []
             continue
-        chain_jues = []
-        prev_jue = None
-        for jdef in chain_jdefs:
-            jue_target_name = _jdef_to_jue_name(jdef, suffix)
-            if cmds.objExists(jue_target_name):
-                skipped.append((jue_target_name, "name already taken in scene"))
-                # Link via existing anyway? Safer to skip the whole node.
-                continue
-            jue_short = _create_jue_joint(jdef, jue_target_name, prev_jue)
-            jdef_to_jue[jdef] = jue_short
-            jue_to_jdef[jue_short] = jdef
-            chain_jues.append(jue_short)
-            created.append(jue_short)
-            prev_jue = jue_short
-        module_chains[mod_name] = chain_jues
 
-    # Pass 2: cross-module parenting by guide topology.
+        chain = []
+        # Map jue_name -> (placeholder or resolved parent)
+        # Within a module, parents appear in sequence before their children,
+        # so resolving is straightforward.
+        intra_name_to_real = {}
+        for rec in sequence:
+            parent_ref = rec["parent_ref"]
+            if parent_ref == _CROSS_MODULE_PLACEHOLDER:
+                real_parent = None  # placeholder; resolved in pass 2
+            else:
+                real_parent = intra_name_to_real.get(parent_ref)
+            target_name = rec["jue_name"]
+            if cmds.objExists(target_name):
+                skipped.append(
+                    (target_name, "name already taken in scene; skipping")
+                )
+                continue
+            if rec["drive"]:
+                jue_short = _create_driven_jue(
+                    rec["pos_src"], target_name, parent_jue=real_parent
+                )
+                jue_to_drive[jue_short] = rec["drive"]
+                jdef_to_jue[rec["drive"]] = jue_short
+            else:
+                jue_short = _create_static_jue(
+                    rec["pos_src"], target_name, parent_jue=real_parent
+                )
+            created.append(jue_short)
+            chain.append(jue_short)
+            intra_name_to_real[rec["jue_name"]] = jue_short
+            # First jUE of the module is the "head" (parent_ref was the
+            # placeholder).  Remember the placeholder owner too.
+        module_chains[mod_name] = chain
+
+    # ------- Pass 2: cross-module parenting ---------------------------------
+    # For every module whose head jUE was created with the placeholder parent,
+    # find the correct attachment point: the jUE that corresponds to
+    # (guide_root's joint-ancestor).  Fallback: attach to root_jUE.
     for m in modules:
         mod_name = m["info"]["module_name"]
-        chain = module_chains.get(mod_name, [])
+        chain = module_chains.get(mod_name) or []
         if not chain:
             continue
         head = chain[0]
         guide_root = m["guide_root"]
         parent_guide_short = _find_parent_joint(guide_root)
-        if parent_guide_short is None:
-            # Top-level module -- parent to root_jUE directly.
-            try:
-                cmds.parent(head, ue_root_short)
-            except RuntimeError as exc:
-                skipped.append((head, "parent to root failed: %s" % exc))
-            continue
-        parent_module_name = _find_module_of_guide(parent_guide_short, modules)
-        if parent_module_name is None:
-            log.warning(
-                "UE skeleton: cannot resolve parent module for guide %r "
-                "(from module %r); attaching head to root." %
-                (parent_guide_short, mod_name)
-            )
-            try:
-                cmds.parent(head, ue_root_short)
-            except RuntimeError:
-                pass
-            continue
-        parent_chain = module_chains.get(parent_module_name, [])
-        if not parent_chain:
-            log.warning(
-                "UE skeleton: parent module %r has no jUE chain; "
-                "attaching %r head to root." % (parent_module_name, mod_name)
-            )
-            try:
-                cmds.parent(head, ue_root_short)
-            except RuntimeError:
-                pass
-            continue
-        # Closest jUE in the parent chain by world distance.
-        head_pos = _world_pos(head)
-        best_parent = min(
-            parent_chain,
-            key=lambda j: (_world_pos(j) - head_pos).length(),
-        )
-        try:
-            cmds.parent(head, best_parent)
-        except RuntimeError as exc:
-            log.warning(
-                "UE skeleton: parent %r under %r failed: %s" %
-                (head, best_parent, exc)
-            )
-            skipped.append((head, "reparent failed: %s" % exc))
+        target_parent = None
+        if parent_guide_short is not None:
+            expected_jue = _guide_to_jue_name(parent_guide_short, suffix)
+            if cmds.objExists(expected_jue):
+                target_parent = expected_jue
+        if target_parent is None:
+            # Either top-level module, or the parent module was skipped /
+            # produced no jUE for that guide.  Attach head to root_jUE.
+            target_parent = ue_root_short
 
-    # Pass 3: add driving constraints last, so hierarchy is settled.
-    for jue_short, jdef in jue_to_jdef.items():
+        # head's current parent after pass 1 is world (because the
+        # placeholder resolved to None).  Re-parent under target.
+        try:
+            cmds.parent(head, target_parent)
+        except RuntimeError as exc:
+            # Already parented correctly or something blocks the move.
+            log.warning(
+                "UE skeleton: parent %s under %s failed: %s" %
+                (head, target_parent, exc)
+            )
+
+    # ------- Pass 3: animation drivers --------------------------------------
+    for jue_short, jdef in jue_to_drive.items():
         _mirror_animation(jdef, jue_short)
 
     return {
@@ -440,15 +636,67 @@ def build_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP, suffix=UE_SUFFIX):
         "created": created,
         "skipped": skipped,
         "module_chains": module_chains,
+        "module_status": module_status,
         "jdef_to_jue": jdef_to_jue,
+        "source": source,
+        "granularity": granularity,
     }
 
 
-def rebuild_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP, suffix=UE_SUFFIX):
+def rebuild_ue_skeleton(
+    source="auto",
+    granularity="main",
+    root_name=UE_ROOT,
+    group_name=UE_GROUP,
+    suffix=UE_SUFFIX,
+):
     """Delete the existing UE skeleton (if any) and rebuild from scratch.
-
     Idempotent wrapper around :func:`build_ue_skeleton`."""
     delete_ue_skeleton(group_name=group_name)
     return build_ue_skeleton(
-        root_name=root_name, group_name=group_name, suffix=suffix
+        source=source,
+        granularity=granularity,
+        root_name=root_name,
+        group_name=group_name,
+        suffix=suffix,
     )
+
+
+# ---------------------------------------------------------------------------
+# UI helper: module status snapshot
+# ---------------------------------------------------------------------------
+
+def module_status_snapshot():
+    """Return a list of per-module status dicts for UI previewing.
+
+    Each entry::
+
+        {
+            "module_name":  str,
+            "module_type":  str,
+            "side":         "L" | "R" | "C",
+            "root_joint":   str,
+            "guide_count":  int,
+            "has_rig":      bool,
+            "jdef_count":   int,
+        }
+
+    Safe to call even if there are no guide roots -- returns [].
+    """
+    try:
+        modules = _collect_modules()
+    except RuntimeError:
+        return []
+    out = []
+    for m in modules:
+        info = m["info"]
+        out.append({
+            "module_name": info["module_name"],
+            "module_type": info["module_type"],
+            "side": info["side"],
+            "root_joint": info["root_joint"],
+            "guide_count": len(m["guide_chain"]),
+            "has_rig": m["has_rig"],
+            "jdef_count": len(m["jdefs"]),
+        })
+    return out

@@ -38,9 +38,16 @@ def _short(name):
 
 def _build_jdef_to_jue_map():
     """Scan every ``*_jUE`` joint in the scene and build a reverse map
-    from the ``sourceJDef`` attribute.  Falls back to name-based
-    derivation (strip ``_jDef``, append ``_jUE``) for any jUE missing
-    the attr -- legacy / hand-created skeletons."""
+    from the ``sourceJDef`` attribute.
+
+    ``sourceJDef`` semantics (set by builder.py):
+        * non-empty string -> this jUE is driven by that `_jDef`; it
+          participates in skin transfer.
+        * empty string     -> this jUE is static (built from guide data
+          for an unbuilt module); skin transfer skips it.
+        * attribute missing -> legacy jUE with no metadata; fall back
+          to the naming-convention guess so old scenes still work.
+    """
     mapping = {}
     ue_candidates = cmds.ls("*" + UE_SUFFIX, type="joint") or []
     for jue in ue_candidates:
@@ -49,6 +56,7 @@ def _build_jdef_to_jue_map():
             jdef = cmds.getAttr("%s.%s" % (jue_short, _SOURCE_ATTR))
             if jdef:
                 mapping[_short(jdef)] = jue_short
+            # Empty string -> static jUE; deliberately not mapped.
         else:
             # Fallback: reverse the naming convention.
             if jue_short.endswith(UE_SUFFIX):
