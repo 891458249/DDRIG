@@ -1,10 +1,22 @@
 {
   "name": "All Suffix Lower",
-  "description": "_l / _r / _c lower-case suffix for every side.",
+  "description": "_l / _r / _c lowercase suffix",
   "builtin": true,
   "sides": {
-    "L": {"mode": "suffix", "token": "l", "separator": "_"},
-    "R": {"mode": "suffix", "token": "r", "separator": "_"},
-    "C": {"mode": "suffix", "token": "c", "separator": "_"}
+    "L": {
+      "mode": "suffix",
+      "token": "l",
+      "separator": "_"
+    },
+    "R": {
+      "mode": "suffix",
+      "token": "r",
+      "separator": "_"
+    },
+    "C": {
+      "mode": "suffix",
+      "token": "c",
+      "separator": "_"
+    }
   }
 }

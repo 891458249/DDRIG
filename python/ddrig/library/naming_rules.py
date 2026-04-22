@@ -62,6 +62,128 @@ _RULES_DIR = os.path.abspath(
 
 
 # ---------------------------------------------------------------------------
+# Bundled builtin rules -- the source of truth for self-heal and reset.
+# JSON files in _RULES_DIR are working copies; editing a builtin via
+# update_rule overwrites its JSON in place (preserving builtin=True).
+# Deleting a builtin JSON manually is recovered by _ensure_builtins on
+# the next list_rules() call.  Reset via reset_builtin_rules() rewrites
+# every JSON back to the constants here, without touching user rules.
+# ---------------------------------------------------------------------------
+BUILTIN_RULES = [
+    {
+        "name": "DDRIG Default",
+        "description": "L/R prefix upper, Center none",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "prefix", "token": "L", "separator": "_"},
+            "R": {"mode": "prefix", "token": "R", "separator": "_"},
+            "C": {"mode": "none"},
+        },
+    },
+    {
+        "name": "All Prefix Upper",
+        "description": "L_ / R_ / C_ uppercase prefix",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "prefix", "token": "L", "separator": "_"},
+            "R": {"mode": "prefix", "token": "R", "separator": "_"},
+            "C": {"mode": "prefix", "token": "C", "separator": "_"},
+        },
+    },
+    {
+        "name": "All Prefix Lower",
+        "description": "l_ / r_ / c_ lowercase prefix",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "prefix", "token": "l", "separator": "_"},
+            "R": {"mode": "prefix", "token": "r", "separator": "_"},
+            "C": {"mode": "prefix", "token": "c", "separator": "_"},
+        },
+    },
+    {
+        "name": "All Suffix Lower",
+        "description": "_l / _r / _c lowercase suffix",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "suffix", "token": "l", "separator": "_"},
+            "R": {"mode": "suffix", "token": "r", "separator": "_"},
+            "C": {"mode": "suffix", "token": "c", "separator": "_"},
+        },
+    },
+    {
+        "name": "All Mid Lower",
+        "description": "_l_ / _r_ / _c_ infix (lowercase)",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "mid", "token": "l", "separator": "_"},
+            "R": {"mode": "mid", "token": "r", "separator": "_"},
+            "C": {"mode": "mid", "token": "c", "separator": "_"},
+        },
+    },
+    {
+        "name": "Mid LRM",
+        "description": "_l_ / _r_ / _m_ infix (m for center)",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "mid", "token": "l", "separator": "_"},
+            "R": {"mode": "mid", "token": "r", "separator": "_"},
+            "C": {"mode": "mid", "token": "m", "separator": "_"},
+        },
+    },
+    {
+        "name": "Pure Null",
+        "description": "No side token anywhere",
+        "builtin": True,
+        "sides": {
+            "L": {"mode": "none"},
+            "R": {"mode": "none"},
+            "C": {"mode": "none"},
+        },
+    },
+]
+
+
+def _write_builtin_to_disk(rule):
+    """Write a builtin rule to its canonical file, overwriting if present.
+
+    Uses the same _slugify as user rules for filename consistency.  Builtin
+    files do NOT carry the ``user_`` prefix -- that prefix is reserved for
+    user-created rules and is what .gitignore excludes.
+    """
+    os.makedirs(_RULES_DIR, exist_ok=True)
+    path = os.path.join(_RULES_DIR, _slugify(rule["name"]) + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rule, f, indent=2, ensure_ascii=False)
+    return path
+
+
+def _ensure_builtins():
+    """Self-heal: re-write any BUILTIN_RULES entry missing from disk.
+
+    Scans _RULES_DIR for existing name fields; any BUILTIN_RULES entry
+    whose name is absent is written from the constant.  Does NOT
+    overwrite existing builtin files -- user edits to a builtin via
+    update_rule survive.
+
+    Reads directly with glob/json to avoid recursing into list_rules().
+    Safe and idempotent on every list_rules() invocation.
+    """
+    os.makedirs(_RULES_DIR, exist_ok=True)
+    existing_names = set()
+    for path in glob.glob(os.path.join(_RULES_DIR, "*.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            existing_names.add(data.get("name"))
+    for rule in BUILTIN_RULES:
+        if rule["name"] not in existing_names:
+            _write_builtin_to_disk(rule)
+
+
+# ---------------------------------------------------------------------------
 # Filesystem layer
 # ---------------------------------------------------------------------------
 
@@ -73,7 +195,12 @@ def rules_dir():
 def list_rules():
     """Return every rule dict, builtins first then user-created, each
     alphabetically within its group. Malformed JSON files are silently
-    skipped so a bad user rule cannot take the whole registry down."""
+    skipped so a bad user rule cannot take the whole registry down.
+
+    Self-heals missing builtin files before scanning, so a hand-deleted
+    ``pure_null.json`` will reappear on the next call.
+    """
+    _ensure_builtins()
     if not os.path.isdir(_RULES_DIR):
         return []
     builtins, user = [], []
@@ -182,46 +309,63 @@ def delete_rule(name):
 
 
 def update_rule(original_name, new_rule):
-    """In-place update of an existing user rule. Supports renaming
-    (``original_name != new_rule['name']``).
+    """In-place update of an existing rule (user OR builtin).
+
+    Behaviour depends on whether the original rule is builtin:
+
+    Builtin branch:
+        * The rule stays builtin (``builtin=True`` is forced regardless of
+          caller input).
+        * Renames are refused -- BUILTIN_RULES looks up by name, so the
+          user must keep the name stable.  To create a differently-named
+          variation, use ``save_rule`` (i.e. the UI's New... with
+          Based-on).
+        * JSON file is overwritten in place (same slug).
+        * activeNamingRule pointer is not touched.
+
+    User branch (unchanged from previous iterations):
+        * ``builtin`` is forced to False.
+        * New JSON is written first; old file is removed afterwards on
+          rename.  Crash between the two leaves the new file intact.
+        * Name collisions with any other existing rule raise ValueError
+          BEFORE any disk write.
+        * activeNamingRule follows the rename.
 
     Args:
         original_name: current name of the rule to update.
         new_rule: full rule dict -- validated before anything is written.
-            The ``builtin`` flag is forced to False regardless of input.
-
-    Behaviour:
-        * Builtin rules are refused (UI's disabled Edit button is the
-          first line of defence; this is the second).
-        * The new JSON is written first.  The old file (if the name
-          changed) is removed only after the new file is safely on disk,
-          so a crash in between leaves a recoverable state rather than
-          nothing.
-        * If the active rule happened to point at ``original_name`` and
-          the name changed, the active-rule pointer follows the rename.
 
     Raises:
-        ValueError: original missing, original is builtin, or the new
-            name collides with another existing rule (other than the
-            one being edited).
+        ValueError: original missing, builtin rename attempted, or (user
+            branch only) name collision with another existing rule.
 
     Returns:
-        str: path of the newly-written JSON file.
+        str: path of the written JSON file.
     """
-    new_rule = dict(new_rule)  # shallow copy, do not mutate caller input
-    new_rule.pop("builtin", None)
-    new_rule["builtin"] = False
+    new_rule = dict(new_rule)  # shallow copy -- do not mutate caller input
     validate_rule(new_rule)
 
     original = get_rule(original_name)
     if original is None:
         raise ValueError("Rule %r not found." % original_name)
-    if original.get("builtin", False):
-        raise ValueError(
-            "Rule %r is builtin and cannot be edited." % original_name
-        )
 
+    was_builtin = original.get("builtin", False)
     new_name = new_rule["name"]
+
+    if was_builtin:
+        if new_name != original_name:
+            raise ValueError(
+                "Cannot rename builtin rule %r. Use 'New...' with "
+                "'Based on' to create a differently-named variant."
+                % original_name
+            )
+        # In-place overwrite; preserve builtin marker.
+        new_rule["builtin"] = True
+        return _write_builtin_to_disk(new_rule)
+
+    # ----- user branch -----
+    new_rule["builtin"] = False
+
     if new_name != original_name and get_rule(new_name) is not None:
         raise ValueError("Rule name %r already exists." % new_name)
 
@@ -263,6 +407,8 @@ def update_rule(original_name, new_rule):
                 # userSettings unavailable or validation lost a race;
                 # ignore -- the edit itself already succeeded.
                 pass
+
+    return new_path
 
     return new_path
 
@@ -416,3 +562,83 @@ def strip_side(name, side, rule):
             return name[:-len(tail)]
         return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Reset to bundled defaults
+# ---------------------------------------------------------------------------
+
+def reset_builtin_rules():
+    """Overwrite every builtin rule file with the corresponding entry in
+    ``BUILTIN_RULES``.  Used by Help > Reset... .
+
+    Policy:
+        * Every BUILTIN_RULES entry is (re)written to disk.
+        * Any on-disk rule with ``builtin=True`` whose name is NOT in
+          BUILTIN_RULES is removed -- lets the registry shed rules that
+          an earlier plugin version bundled but a later version dropped.
+        * User rules (``builtin=False``) are NEVER touched.
+        * ``activeNamingRule`` is NOT modified.  If the user's active
+          rule happens to be a builtin whose content changed, the new
+          content is what takes effect on the next build -- that is the
+          intended meaning of "reset to defaults".
+
+    Returns:
+        dict: ``{"reset": [names], "removed_stale": [names],
+                 "preserved_user_rules": int}``.
+    """
+    builtin_names = {r["name"] for r in BUILTIN_RULES}
+    removed_stale = []
+
+    # Sweep stale builtins (marked builtin=True on disk but not in the constant)
+    for path in glob.glob(os.path.join(_RULES_DIR, "*.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("builtin", False) and data.get("name") not in builtin_names:
+            try:
+                os.remove(path)
+                removed_stale.append(data.get("name", os.path.basename(path)))
+            except OSError:
+                pass
+
+    # Rewrite every builtin from its canonical source.
+    for rule in BUILTIN_RULES:
+        _write_builtin_to_disk(rule)
+
+    preserved = sum(
+        1 for r in list_rules() if not r.get("builtin", False)
+    )
+    return {
+        "reset": [r["name"] for r in BUILTIN_RULES],
+        "removed_stale": removed_stale,
+        "preserved_user_rules": preserved,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reset-registry integration (side-effect on import)
+# ---------------------------------------------------------------------------
+# Registered here so the Help > Reset... dialog can enumerate this entry
+# as soon as ddrig.library.naming_rules has been imported anywhere.
+try:
+    from ddrig.core import reset_registry as _reset_registry
+    _reset_registry.register(
+        key="naming_rules",
+        label="Naming Rules (builtin defaults)",
+        description=(
+            "Overwrites all builtin naming rules with the bundled defaults "
+            "from the BUILTIN_RULES constant. User-created rules and your "
+            "active rule selection are preserved."
+        ),
+        default_checked=True,
+        action=reset_builtin_rules,
+    )
+except Exception:
+    # Keep module import resilient when reset_registry is unavailable
+    # (standalone test environments, partial installs, etc.).
+    pass

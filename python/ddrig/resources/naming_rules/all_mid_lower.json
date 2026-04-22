@@ -1,10 +1,22 @@
 {
   "name": "All Mid Lower",
-  "description": "_l_ / _r_ / _c_ lower-case infix placed after the first label token.",
+  "description": "_l_ / _r_ / _c_ infix (lowercase)",
   "builtin": true,
   "sides": {
-    "L": {"mode": "mid", "token": "l", "separator": "_"},
-    "R": {"mode": "mid", "token": "r", "separator": "_"},
-    "C": {"mode": "mid", "token": "c", "separator": "_"}
+    "L": {
+      "mode": "mid",
+      "token": "l",
+      "separator": "_"
+    },
+    "R": {
+      "mode": "mid",
+      "token": "r",
+      "separator": "_"
+    },
+    "C": {
+      "mode": "mid",
+      "token": "c",
+      "separator": "_"
+    }
   }
 }

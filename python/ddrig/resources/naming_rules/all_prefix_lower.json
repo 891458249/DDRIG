@@ -1,10 +1,22 @@
 {
   "name": "All Prefix Lower",
-  "description": "l_/r_/c_ lower-case prefix for every side.",
+  "description": "l_ / r_ / c_ lowercase prefix",
   "builtin": true,
   "sides": {
-    "L": {"mode": "prefix", "token": "l", "separator": "_"},
-    "R": {"mode": "prefix", "token": "r", "separator": "_"},
-    "C": {"mode": "prefix", "token": "c", "separator": "_"}
+    "L": {
+      "mode": "prefix",
+      "token": "l",
+      "separator": "_"
+    },
+    "R": {
+      "mode": "prefix",
+      "token": "r",
+      "separator": "_"
+    },
+    "C": {
+      "mode": "prefix",
+      "token": "c",
+      "separator": "_"
+    }
   }
 }

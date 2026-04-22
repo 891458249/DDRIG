@@ -1,10 +1,20 @@
 {
   "name": "DDRIG Default",
-  "description": "L/R as upper-case prefix, Center untagged. Matches user convention that middle modules should not carry a side token.",
+  "description": "L/R prefix upper, Center none",
   "builtin": true,
   "sides": {
-    "L": {"mode": "prefix", "token": "L", "separator": "_"},
-    "R": {"mode": "prefix", "token": "R", "separator": "_"},
-    "C": {"mode": "none"}
+    "L": {
+      "mode": "prefix",
+      "token": "L",
+      "separator": "_"
+    },
+    "R": {
+      "mode": "prefix",
+      "token": "R",
+      "separator": "_"
+    },
+    "C": {
+      "mode": "none"
+    }
   }
 }
