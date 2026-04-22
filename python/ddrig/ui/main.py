@@ -317,6 +317,13 @@ class MainUI(QtWidgets.QMainWindow):
         rom_randomizer_action = QtWidgets.QAction(self, text="ROM Randomizer")
         menu_tools.addAction(rom_randomizer_action)
 
+        menu_tools.addSeparator()
+        clean_orphan_guides_action = QtWidgets.QAction(
+            self, text="Clean Orphan Guides"
+        )
+        menu_tools.addAction(clean_orphan_guides_action)
+        clean_orphan_guides_action.triggered.connect(self.on_clean_orphan_guides)
+
         menubar.addAction(menu_tools.menuAction())
 
         # Status BAR
@@ -1508,6 +1515,53 @@ class MainUI(QtWidgets.QMainWindow):
         if not result["deleted_limb_group"]:
             msg += " — note: limb group not found, joint subtree only"
         self.statusbar.showMessage(msg, 5000)
+
+    def on_clean_orphan_guides(self):
+        """Tools -> Clean Orphan Guides handler.
+
+        Delegates to Initials.cleanup_orphan_guide_groups which removes
+        every '_guides' subtree under '{projectName}_refGuides' that no
+        longer has a corresponding guide root joint. Shows an informative
+        dialog summarising what was removed (or reporting 'nothing to
+        clean' when the scene is already tidy)."""
+        try:
+            result = self.guides_handler.init.cleanup_orphan_guide_groups()
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(
+                self, "Clean Orphan Guides failed", str(exc)
+            )
+            return
+
+        orphans = result["orphan_groups"]
+        if not orphans and not result["deleted_holder"]:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Clean Orphan Guides",
+                "No orphan guide groups found — scene is clean.",
+            )
+            return
+
+        lines = []
+        if orphans:
+            lines.append(
+                "Removed %d orphan guide group%s:" %
+                (len(orphans), "" if len(orphans) == 1 else "s")
+            )
+            lines.extend("  - " + name for name in orphans)
+        if result["deleted_holder"]:
+            lines.append("")
+            lines.append(
+                "ddrig_refGuides holder was empty and has also been removed."
+            )
+        lines.append("")
+        lines.append(
+            "Total nodes removed: %d.  Ctrl+Z undoes the whole cleanup."
+            % result["nodes_deleted"]
+        )
+        QtWidgets.QMessageBox.information(
+            self, "Clean Orphan Guides", "\n".join(lines)
+        )
+        self.populate_guides()
 
     def update_properties(self, property, value):
         root_jnt = self.guides_list_treeWidget.currentItem().text(2)

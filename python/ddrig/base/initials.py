@@ -795,6 +795,77 @@ class Initials(object):
             "nodes_deleted": nodes_deleted,
         }
 
+    def cleanup_orphan_guide_groups(self):
+        """Find and delete orphan '_guides' limb groups — those that no
+        longer have a corresponding guide root joint in the scene.
+
+        Typical cause: the user deleted the guide joint chain from the
+        Outliner (or via Del in the Maya viewport) which left the
+        '{side}_{unique}_guides' group with only the locators subgroup
+        behind. ``populate_guides`` cannot see those orphans because it
+        scans by joint type, so without this helper they accumulate
+        invisibly in '{projectName}_refGuides'.
+
+        Returns:
+            dict with keys:
+                orphan_groups   -- short names of the groups that were
+                                   removed (empty list if none found).
+                deleted_holder  -- True if '{projectName}_refGuides'
+                                   ended up empty and was removed too.
+                nodes_deleted   -- rough total (each group + its
+                                   descendants + the holder if removed).
+        """
+        holder_name = "%s_refGuides" % self.projectName
+        if not cmds.objExists(holder_name):
+            return {
+                "orphan_groups": [],
+                "deleted_holder": False,
+                "nodes_deleted": 0,
+            }
+
+        live_module_names = {
+            info["module_name"] for info in self.get_scene_roots()
+        }
+
+        children = cmds.listRelatives(
+            holder_name, children=True, fullPath=True
+        ) or []
+        orphan_paths = []
+        for child in children:
+            short = child.rsplit("|", 1)[-1]
+            if not short.endswith("_guides"):
+                continue
+            mod_name = short[: -len("_guides")]
+            if mod_name not in live_module_names:
+                orphan_paths.append((child, short))
+
+        nodes_deleted = 0
+        deleted_holder = False
+        cmds.undoInfo(openChunk=True, chunkName="ddrig_cleanup_orphans")
+        try:
+            for path, _short in orphan_paths:
+                descendants = cmds.listRelatives(
+                    path, allDescendents=True, fullPath=True
+                ) or []
+                nodes_deleted += 1 + len(descendants)
+                cmds.delete(path)
+            if cmds.objExists(holder_name):
+                remaining = cmds.listRelatives(
+                    holder_name, children=True
+                ) or []
+                if not remaining:
+                    cmds.delete(holder_name)
+                    deleted_holder = True
+                    nodes_deleted += 1
+        finally:
+            cmds.undoInfo(closeChunk=True)
+
+        return {
+            "orphan_groups": [short for _path, short in orphan_paths],
+            "deleted_holder": deleted_holder,
+            "nodes_deleted": nodes_deleted,
+        }
+
     def get_extra_properties(self, module_type):
         module_type_dict = self.module_dict.get(module_type)
         if module_type_dict:
