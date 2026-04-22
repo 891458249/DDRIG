@@ -273,14 +273,32 @@ def rename_skinclusters():
         cmds.rename(skin, sc_name)
 
 
-def parse(labels, prefix="", suffix="", side=""):
-    """Parse object name with given parameters"""
-    if not isinstance(labels, (list, tuple)):
-        labels = [labels]
-    elements = [side, prefix] + labels + [suffix]
-    # filter the elements to remove empty strings
-    elements = [str(e) for e in elements if e != ""]
-    return "_".join(elements)
+def parse(labels, prefix="", suffix="", side="", rule_name=None):
+    """Parse object name with given parameters.
+
+    Side token placement is delegated to the naming_rules registry — the
+    active rule decides whether ``side`` becomes a prefix, suffix, infix
+    or is dropped entirely.  The signature is backward compatible: every
+    pre-existing call site that does not pass ``rule_name`` picks up the
+    user's currently active rule automatically.
+
+    Args:
+        labels: a list (or a single string) of label tokens.
+        prefix: optional extra prefix inserted after the side token.
+        suffix: optional trailing suffix.
+        side: one of 'L'/'R'/'C' or empty string.
+        rule_name: optional explicit rule name to use (e.g. when replaying
+            a session archive saved under a different rule).  ``None``
+            means "use the currently active rule".
+    """
+    from ddrig.library import naming_rules
+    if rule_name is not None:
+        rule = naming_rules.get_rule(rule_name)
+    else:
+        rule = naming_rules.get_active_rule()
+    return naming_rules.apply_side(
+        side, labels, prefix=prefix, suffix=suffix, rule=rule
+    )
 
 def convert_to_ranged_format(ids, prefix="vtx"):
     """Convert the given vertex ids to ranged format.
