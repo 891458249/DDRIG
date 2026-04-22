@@ -181,6 +181,92 @@ def delete_rule(name):
     raise ValueError("Rule %r has no backing file on disk." % name)
 
 
+def update_rule(original_name, new_rule):
+    """In-place update of an existing user rule. Supports renaming
+    (``original_name != new_rule['name']``).
+
+    Args:
+        original_name: current name of the rule to update.
+        new_rule: full rule dict -- validated before anything is written.
+            The ``builtin`` flag is forced to False regardless of input.
+
+    Behaviour:
+        * Builtin rules are refused (UI's disabled Edit button is the
+          first line of defence; this is the second).
+        * The new JSON is written first.  The old file (if the name
+          changed) is removed only after the new file is safely on disk,
+          so a crash in between leaves a recoverable state rather than
+          nothing.
+        * If the active rule happened to point at ``original_name`` and
+          the name changed, the active-rule pointer follows the rename.
+
+    Raises:
+        ValueError: original missing, original is builtin, or the new
+            name collides with another existing rule (other than the
+            one being edited).
+
+    Returns:
+        str: path of the newly-written JSON file.
+    """
+    new_rule = dict(new_rule)  # shallow copy, do not mutate caller input
+    new_rule.pop("builtin", None)
+    new_rule["builtin"] = False
+    validate_rule(new_rule)
+
+    original = get_rule(original_name)
+    if original is None:
+        raise ValueError("Rule %r not found." % original_name)
+    if original.get("builtin", False):
+        raise ValueError(
+            "Rule %r is builtin and cannot be edited." % original_name
+        )
+
+    new_name = new_rule["name"]
+    if new_name != original_name and get_rule(new_name) is not None:
+        raise ValueError("Rule name %r already exists." % new_name)
+
+    os.makedirs(_RULES_DIR, exist_ok=True)
+    new_path = os.path.join(
+        _RULES_DIR, "user_" + _slugify(new_name) + ".json"
+    )
+    with open(new_path, "w", encoding="utf-8") as f:
+        json.dump(new_rule, f, indent=2, ensure_ascii=False)
+
+    # Remove the old file if the rename landed on a different slug.
+    # We locate the old file by scanning for a name match rather than
+    # assuming _slugify(original_name) == the old filename, because the
+    # file might have been hand-edited on disk in the meantime.
+    if new_name != original_name:
+        for path in glob.glob(os.path.join(_RULES_DIR, "*.json")):
+            if os.path.normpath(path) == os.path.normpath(new_path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if (isinstance(data, dict)
+                    and data.get("name") == original_name
+                    and not data.get("builtin", False)):
+                try:
+                    os.remove(path)
+                except OSError:
+                    # Best-effort; the new file is already the canonical
+                    # copy (get_rule returns the sorted winner).
+                    pass
+                break
+        # Carry the active-rule pointer across the rename if applicable.
+        if get_active_rule_name() == original_name:
+            try:
+                set_active_rule_name(new_name)
+            except (ValueError, RuntimeError):
+                # userSettings unavailable or validation lost a race;
+                # ignore -- the edit itself already succeeded.
+                pass
+
+    return new_path
+
+
 # ---------------------------------------------------------------------------
 # Active-rule persistence (wraps db.userSettings.activeNamingRule)
 # ---------------------------------------------------------------------------

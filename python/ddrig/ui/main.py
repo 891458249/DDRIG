@@ -109,8 +109,15 @@ def launch(force=False, disable_version_control=False):
     MainUI(disable_version_control=disable_version_control).show()
 
 
-class NewNamingRuleDialog(QtWidgets.QDialog):
-    """Modal dialog for composing a new user-defined naming rule.
+class NamingRuleDialog(QtWidgets.QDialog):
+    """Modal dialog for composing or editing a user-defined naming rule.
+
+    Modes:
+        New mode   (rule is None)           -- calls naming_rules.save_rule.
+        Edit mode  (rule is dict, original_name is str)
+                                            -- calls naming_rules.update_rule
+                                               with the original name so the
+                                               old file is removed on rename.
 
     Fields:
         Name, Description (free text)
@@ -119,16 +126,21 @@ class NewNamingRuleDialog(QtWidgets.QDialog):
             Token QLineEdit  (disabled when mode == 'none')
             Separator QLineEdit, defaults to '_'  (disabled when mode == 'none')
 
-    On OK, builds a rule dict and calls naming_rules.save_rule().  Errors
-    are surfaced via QMessageBox and keep the dialog open so the user can
-    fix the input.
+    On OK, errors are surfaced via QMessageBox and keep the dialog open so
+    the user can fix the input without losing their typed values.
     """
 
-    def __init__(self, parent=None):
-        super(NewNamingRuleDialog, self).__init__(parent)
-        self.setWindowTitle("New Naming Rule")
+    def __init__(self, parent=None, rule=None, original_name=None):
+        super(NamingRuleDialog, self).__init__(parent)
+        self._edit_mode = rule is not None
+        self._original_name = original_name
+        self.setWindowTitle(
+            "Edit Naming Rule" if self._edit_mode else "New Naming Rule"
+        )
         self.setMinimumWidth(460)
         self._build_ui()
+        if rule is not None:
+            self._prefill(rule)
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -180,6 +192,26 @@ class NewNamingRuleDialog(QtWidgets.QDialog):
         token_le.setEnabled(enabled)
         sep_le.setEnabled(enabled)
 
+    def _prefill(self, rule):
+        """Populate every widget from an existing rule dict. Used by
+        Edit mode. Called once after _build_ui(), before the dialog is
+        shown, so no currentTextChanged feedback loops are observable."""
+        self.name_le.setText(rule.get("name", ""))
+        self.desc_le.setText(rule.get("description", ""))
+        sides = rule.get("sides", {})
+        for side, (mode_cb, token_le, sep_le) in self.side_rows.items():
+            cfg = sides.get(side, {"mode": "none"})
+            mode = cfg.get("mode", "none")
+            idx = mode_cb.findText(mode)
+            if idx >= 0:
+                mode_cb.setCurrentIndex(idx)
+            token_le.setText(cfg.get("token", side))
+            sep_le.setText(cfg.get("separator", "_"))
+            # Ensure the enabled state follows the just-loaded mode even
+            # if setCurrentIndex did not emit currentTextChanged (Qt
+            # suppresses the signal when the index was already selected).
+            self._on_mode_changed(side, mode)
+
     def _collect_rule(self):
         rule = {
             "name": self.name_le.text().strip(),
@@ -200,11 +232,20 @@ class NewNamingRuleDialog(QtWidgets.QDialog):
         from ddrig.library import naming_rules
         rule = self._collect_rule()
         try:
-            naming_rules.save_rule(rule)
+            if self._edit_mode:
+                naming_rules.update_rule(self._original_name, rule)
+            else:
+                naming_rules.save_rule(rule)
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Save failed", str(exc))
             return
         self.accept()
+
+
+# Back-compat alias: earlier commits referred to the class as
+# NewNamingRuleDialog.  Keep the old name resolvable so any stray
+# import or user snippet does not break.
+NewNamingRuleDialog = NamingRuleDialog
 
 
 class MainUI(QtWidgets.QMainWindow):
@@ -679,12 +720,16 @@ class MainUI(QtWidgets.QMainWindow):
         self.naming_new_rule_btn = QtWidgets.QPushButton(
             self.R_guides_WidgetContents, text="New..."
         )
+        self.naming_edit_rule_btn = QtWidgets.QPushButton(
+            self.R_guides_WidgetContents, text="Edit..."
+        )
         self.naming_delete_rule_btn = QtWidgets.QPushButton(
             self.R_guides_WidgetContents, text="Delete"
         )
         naming_rule_hLay.addWidget(self.naming_rule_combo, 1)
         naming_rule_hLay.addWidget(self.naming_set_default_btn)
         naming_rule_hLay.addWidget(self.naming_new_rule_btn)
+        naming_rule_hLay.addWidget(self.naming_edit_rule_btn)
         naming_rule_hLay.addWidget(self.naming_delete_rule_btn)
         self.module_settings_formLayout.addRow(naming_rule_lbl, naming_rule_hLay)
         self._refresh_naming_rule_combo()
@@ -834,6 +879,7 @@ class MainUI(QtWidgets.QMainWindow):
         )
         self.naming_set_default_btn.clicked.connect(self.on_naming_set_default)
         self.naming_new_rule_btn.clicked.connect(self.on_naming_new_rule)
+        self.naming_edit_rule_btn.clicked.connect(self.on_naming_edit_rule)
         self.naming_delete_rule_btn.clicked.connect(self.on_naming_delete_rule)
 
         self.up_axis_sp_list[0].valueChanged.connect(
@@ -1712,19 +1758,23 @@ class MainUI(QtWidgets.QMainWindow):
                     self.naming_rule_combo.setCurrentIndex(i)
         finally:
             self.naming_rule_combo.blockSignals(False)
-        self._update_naming_delete_button_enabled()
+        self._update_naming_edit_delete_buttons_enabled()
 
-    def _update_naming_delete_button_enabled(self):
+    def _update_naming_edit_delete_buttons_enabled(self):
+        """Gate Edit and Delete buttons on 'is the selection a user
+        (non-builtin) rule?'. Builtins are read-only -- duplicate via
+        New to get a starting point for a variation."""
         from ddrig.library import naming_rules
         name = self.naming_rule_combo.currentData()
         rule = naming_rules.get_rule(name) if name else None
-        can_delete = bool(rule) and not rule.get("builtin", False)
-        self.naming_delete_rule_btn.setEnabled(can_delete)
+        is_user_rule = bool(rule) and not rule.get("builtin", False)
+        self.naming_delete_rule_btn.setEnabled(is_user_rule)
+        self.naming_edit_rule_btn.setEnabled(is_user_rule)
 
     def on_naming_rule_changed(self, index):
         """Combo index changed -- preview selection only, do NOT persist.
         Persistence is an explicit action via Set Default."""
-        self._update_naming_delete_button_enabled()
+        self._update_naming_edit_delete_buttons_enabled()
 
     def on_naming_set_default(self):
         from ddrig.library import naming_rules
@@ -1742,13 +1792,46 @@ class MainUI(QtWidgets.QMainWindow):
         )
 
     def on_naming_new_rule(self):
-        """Open the NewNamingRuleDialog; on accept, refresh the combo so
-        the newly-saved rule appears and is selectable."""
-        dialog = NewNamingRuleDialog(self)
+        """Open NamingRuleDialog in New mode; on accept, refresh the
+        combo so the newly-saved rule appears and is selectable."""
+        dialog = NamingRuleDialog(self)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self._refresh_naming_rule_combo()
             self.statusbar.showMessage(
                 "New naming rule created.", 5000
+            )
+
+    def on_naming_edit_rule(self):
+        """Open NamingRuleDialog in Edit mode for the currently-selected
+        user rule.  The dialog is pre-filled with the rule's current
+        fields; on accept, naming_rules.update_rule is called which
+        handles in-place edits and renames (including active-rule
+        follow-through)."""
+        from ddrig.library import naming_rules
+        name = self.naming_rule_combo.currentData()
+        if not name:
+            return
+        rule = naming_rules.get_rule(name)
+        if rule is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Edit naming rule", "Rule %r not found." % name
+            )
+            return
+        if rule.get("builtin", False):
+            # The Enable-state gate is the primary barrier; this
+            # defensive branch guards against race conditions where the
+            # enabled state lagged behind a rule-file change on disk.
+            QtWidgets.QMessageBox.information(
+                self, "Edit naming rule",
+                "Builtin rules are read-only.  Use New... to create a "
+                "variation of a builtin rule.",
+            )
+            return
+        dialog = NamingRuleDialog(self, rule=rule, original_name=name)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            self._refresh_naming_rule_combo()
+            self.statusbar.showMessage(
+                "Naming rule %r updated." % name, 5000
             )
 
     def on_naming_delete_rule(self):
