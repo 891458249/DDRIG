@@ -1,0 +1,10 @@
+{
+  "name": "All Prefix Upper",
+  "description": "L_/R_/C_ upper-case prefix for every side. Used as the legacy fallback when loading archives that carry no naming rule metadata (pre-2.4 sessions).",
+  "builtin": true,
+  "sides": {
+    "L": {"mode": "prefix", "token": "L", "separator": "_"},
+    "R": {"mode": "prefix", "token": "R", "separator": "_"},
+    "C": {"mode": "prefix", "token": "C", "separator": "_"}
+  }
+}

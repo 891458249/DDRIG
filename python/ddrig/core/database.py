@@ -35,6 +35,10 @@ class RecentSessions(list):
 class UserSettings(object):
     handler = io.IO(file_name="userSettings.json", folder_name="ddrig")
     compareData = {}
+    # Class-level declaration so _parse_from's white-list check
+    # (if UserSettings.__dict__.get(key)) accepts 'activeNamingRule'
+    # on subsequent Maya launches.
+    activeNamingRule = "DDRIG Default"
 
     def __init__(self):
         self.verboseLevel = 0
@@ -47,6 +51,9 @@ class UserSettings(object):
         self.minorLeftColor = 18
         self.majorRightColor = 13
         self.minorRightColor = 12
+        # Name of the active ddrig.library.naming_rules entry.  Written
+        # back by naming_rules.set_active_rule_name() via .apply().
+        self.activeNamingRule = "DDRIG Default"
 
         self.compareData = deepcopy(self._parse_to_dict())
         self._parse_from()

@@ -1,0 +1,10 @@
+{
+  "name": "Pure Null",
+  "description": "No side token on any side. Side is only stored in the joint .side enum attribute; DAG names carry no L/R/C marker.",
+  "builtin": true,
+  "sides": {
+    "L": {"mode": "none"},
+    "R": {"mode": "none"},
+    "C": {"mode": "none"}
+  }
+}

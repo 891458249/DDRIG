@@ -1,0 +1,10 @@
+{
+  "name": "Mid LRM",
+  "description": "_l_ / _r_ / _m_ infix. Center uses 'm' (middle) rather than 'c' (center).",
+  "builtin": true,
+  "sides": {
+    "L": {"mode": "mid", "token": "l", "separator": "_"},
+    "R": {"mode": "mid", "token": "r", "separator": "_"},
+    "C": {"mode": "mid", "token": "m", "separator": "_"}
+  }
+}

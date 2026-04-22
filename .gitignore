@@ -67,5 +67,8 @@ python/ddrig/utils/dembones/Windows/
 # === Maya sample scenes and assets (kept external to repo) ===
 samples/
 
+# === User-created naming rules (generated at runtime) ===
+python/ddrig/resources/naming_rules/user_*.json
+
 # === Sphinx generated documentation (regenerate via `sphinx-build` or `make html`) ===
 docs/source/_build/
