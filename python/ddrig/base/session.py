@@ -6,6 +6,7 @@ from ddrig.library import functions
 from ddrig.library import attribute
 from ddrig.library import joint
 from ddrig.library import api
+from ddrig.library import naming_rules
 
 from ddrig.core import io
 from ddrig.core import filelog
@@ -14,6 +15,42 @@ from ddrig.core import compatibility as compat
 from ddrig.base import initials
 
 log = filelog.Filelog(logname=__name__, filename="ddrig_log")
+
+
+# --- session archive envelope format ---------------------------------------
+# Legacy archives (pre-2.4) were a bare list[joint_dict].  New archives are
+# {"metadata": {...}, "joints": [...]} so the namingRule that was active at
+# save time can be embedded for future migration tools and UI hints.
+# Load code accepts both shapes and treats a bare list as a legacy archive
+# under the LEGACY_FALLBACK rule.
+_ARCHIVE_FORMAT_VERSION = 1
+
+
+def _wrap_archive(joints_data, rule_name):
+    """Wrap a list of joint dicts into the versioned envelope."""
+    return {
+        "formatVersion": _ARCHIVE_FORMAT_VERSION,
+        "metadata": {"namingRule": rule_name},
+        "joints": joints_data,
+    }
+
+
+def _unwrap_archive(raw):
+    """Normalise an archive blob into (joints_list, rule_name).
+
+    Accepts the new envelope dict OR a legacy bare list.  Returns the
+    joints list plus the rule name that was active when the archive was
+    saved (LEGACY_FALLBACK for unmarked archives).
+    """
+    if isinstance(raw, dict) and "joints" in raw:
+        joints = raw.get("joints", []) or []
+        rule_name = (
+            raw.get("metadata", {}).get("namingRule")
+            or naming_rules.LEGACY_FALLBACK
+        )
+        return joints, rule_name
+    # Legacy bare-list archive.
+    return raw or [], naming_rules.LEGACY_FALLBACK
 
 
 class Session(object):
@@ -25,22 +62,36 @@ class Session(object):
         self.init = initials.Initials()
 
     def save_session(self, file_path):
-        """Saves the session to the given file path"""
+        """Saves the session to the given file path."""
         if not os.path.splitext(file_path)[1]:
             file_path = "%s.trg" % file_path
         self.io.file_path = file_path
         guides_data = self.collect_guides()
-        self.io.write(guides_data)
+        archive = _wrap_archive(
+            guides_data, naming_rules.get_active_rule_name()
+        )
+        self.io.write(archive)
         log.info("Session Saved Successfully...")
 
     def load_session(self, file_path, reset_scene=False):
-        """Loads the session from the file"""
+        """Loads the session from the file.
 
+        The archive's namingRule metadata is read for logging / future
+        migration use, but joint DAG names are restored verbatim from the
+        file (rebuild_guides uses the literal ``name`` field in each
+        joint dict), so no rule-based re-styling happens on load.
+        """
         if reset_scene:
             # self.reset_scene()
             scene.reset()
-        guides_data = self._get_guides_data(file_path)
+        guides_data, archive_rule = self._get_guides_data(file_path)
         if guides_data:
+            if archive_rule != naming_rules.get_active_rule_name():
+                log.info(
+                    "Archive was saved under naming rule %r; current active "
+                    "rule is %r. Joint names are restored verbatim." %
+                    (archive_rule, naming_rules.get_active_rule_name())
+                )
             self.rebuild_guides(guides_data)
             log.info("Guides Loaded Successfully...")
         else:
@@ -48,14 +99,20 @@ class Session(object):
             raise Exception
 
     def get_roots_from_file(self, file_path):
-        guides_data = self._get_guides_data(file_path)
+        guides_data, _ = self._get_guides_data(file_path)
         for j in guides_data:
             if j["type"] in self.init.validRootList:
                 yield j["name"]
 
     def _get_guides_data(self, file_path):
+        """Returns ``(joints_list, namingRule)`` tuple.
+
+        Accepts both the new envelope format and legacy bare-list files.
+        Returns ``([], LEGACY_FALLBACK)`` if the file is missing/empty.
+        """
         self.io.file_path = file_path
-        return self.io.read()
+        raw = self.io.read()
+        return _unwrap_archive(raw)
 
     def collect_guides(self):
         """Collect all necessary guide data ready to write"""
