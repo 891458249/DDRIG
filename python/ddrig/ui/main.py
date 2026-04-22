@@ -568,6 +568,29 @@ class MainUI(QtWidgets.QMainWindow):
         self.R_guides_scrollArea_vLay.addLayout(self.module_extras_formLayout)
 
         ## PROPERTIES -General [Start]
+
+        # naming convention row (dropdown + management buttons)
+        naming_rule_lbl = QtWidgets.QLabel(
+            self.R_guides_WidgetContents, text="Naming Convention"
+        )
+        naming_rule_hLay = QtWidgets.QHBoxLayout(spacing=3)
+        self.naming_rule_combo = QtWidgets.QComboBox(self.R_guides_WidgetContents)
+        self.naming_set_default_btn = QtWidgets.QPushButton(
+            self.R_guides_WidgetContents, text="Set Default"
+        )
+        self.naming_new_rule_btn = QtWidgets.QPushButton(
+            self.R_guides_WidgetContents, text="New..."
+        )
+        self.naming_delete_rule_btn = QtWidgets.QPushButton(
+            self.R_guides_WidgetContents, text="Delete"
+        )
+        naming_rule_hLay.addWidget(self.naming_rule_combo, 1)
+        naming_rule_hLay.addWidget(self.naming_set_default_btn)
+        naming_rule_hLay.addWidget(self.naming_new_rule_btn)
+        naming_rule_hLay.addWidget(self.naming_delete_rule_btn)
+        self.module_settings_formLayout.addRow(naming_rule_lbl, naming_rule_hLay)
+        self._refresh_naming_rule_combo()
+
         # name
         module_name_lbl = QtWidgets.QLabel(
             self.R_guides_WidgetContents, text="Module Name"
@@ -706,6 +729,14 @@ class MainUI(QtWidgets.QMainWindow):
         # Instead, on editingFinished (focus-out or Enter) we perform the
         # full scene-side DAG rename via Initials.rename_module().
         self.module_name_le.editingFinished.connect(self.on_module_name_finished)
+
+        # Naming convention row signals
+        self.naming_rule_combo.currentIndexChanged.connect(
+            self.on_naming_rule_changed
+        )
+        self.naming_set_default_btn.clicked.connect(self.on_naming_set_default)
+        self.naming_new_rule_btn.clicked.connect(self.on_naming_new_rule)
+        self.naming_delete_rule_btn.clicked.connect(self.on_naming_delete_rule)
 
         self.up_axis_sp_list[0].valueChanged.connect(
             lambda num: self.update_properties("upAxisX", num)
@@ -1562,6 +1593,92 @@ class MainUI(QtWidgets.QMainWindow):
             self, "Clean Orphan Guides", "\n".join(lines)
         )
         self.populate_guides()
+
+    # ---- Naming rule panel handlers ---------------------------------------
+
+    def _refresh_naming_rule_combo(self):
+        """(Re)populate the Naming Convention dropdown from the registry.
+        The active rule is flagged with ' *' in its label.  Selection
+        follows the active rule so the user sees what is in effect."""
+        from ddrig.library import naming_rules
+        self.naming_rule_combo.blockSignals(True)
+        try:
+            self.naming_rule_combo.clear()
+            rules = naming_rules.list_rules()
+            active = naming_rules.get_active_rule_name()
+            for i, r in enumerate(rules):
+                label = r["name"] + (" *" if r["name"] == active else "")
+                # userData holds the unadorned rule name.
+                self.naming_rule_combo.addItem(label, userData=r["name"])
+                if r["name"] == active:
+                    self.naming_rule_combo.setCurrentIndex(i)
+        finally:
+            self.naming_rule_combo.blockSignals(False)
+        self._update_naming_delete_button_enabled()
+
+    def _update_naming_delete_button_enabled(self):
+        from ddrig.library import naming_rules
+        name = self.naming_rule_combo.currentData()
+        rule = naming_rules.get_rule(name) if name else None
+        can_delete = bool(rule) and not rule.get("builtin", False)
+        self.naming_delete_rule_btn.setEnabled(can_delete)
+
+    def on_naming_rule_changed(self, index):
+        """Combo index changed -- preview selection only, do NOT persist.
+        Persistence is an explicit action via Set Default."""
+        self._update_naming_delete_button_enabled()
+
+    def on_naming_set_default(self):
+        from ddrig.library import naming_rules
+        name = self.naming_rule_combo.currentData()
+        if not name:
+            return
+        try:
+            naming_rules.set_active_rule_name(name)
+        except (ValueError, RuntimeError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Set default failed", str(exc))
+            return
+        self._refresh_naming_rule_combo()
+        self.statusbar.showMessage(
+            "Naming rule %r set as default." % name, 5000
+        )
+
+    def on_naming_new_rule(self):
+        """Placeholder hook -- the dialog implementation lands in a
+        follow-up commit.  For now, surface a notice instead of silently
+        doing nothing, so the button's presence is not misleading."""
+        QtWidgets.QMessageBox.information(
+            self,
+            "New Naming Rule",
+            "The rule-creation dialog is not yet available in this build. "
+            "A follow-up commit adds it.",
+        )
+
+    def on_naming_delete_rule(self):
+        from ddrig.library import naming_rules
+        name = self.naming_rule_combo.currentData()
+        if not name:
+            return
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete naming rule",
+            "Delete rule %r?\n\nThis removes the rule file from disk. "
+            "Any scene currently saved under this rule will still load, "
+            "but the archive's recorded rule name will dangle." % name,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            naming_rules.delete_rule(name)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Delete failed", str(exc))
+            return
+        self._refresh_naming_rule_combo()
+        self.statusbar.showMessage("Rule %r deleted." % name, 5000)
+
+    # ---- /Naming rule panel handlers --------------------------------------
 
     def update_properties(self, property, value):
         root_jnt = self.guides_list_treeWidget.currentItem().text(2)
