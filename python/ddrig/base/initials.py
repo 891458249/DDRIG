@@ -533,69 +533,97 @@ class Initials(object):
         """Rename every DAG node associated with a guide module so the scene
         Outliner stays in sync with the user-facing module name.
 
-        Affected node pattern:
-            - Guide root joint            : ``{side}_{unique}_{member}_jInit``
-            - Guide chain descendants     : same prefix, different member
-            - Limb group (ancestor)       : ``{side}_{unique}_guides``
-            - Locators group (sibling)    : ``{side}_{unique}_locators_grp``
-            - Locator nodes               : ``loc_{guide_joint_name}``
+        Rule-aware: the module's name may carry its side token as a prefix,
+        suffix, infix, or not at all, depending on the active naming rule.
+        The algorithm identifies the "core" part of each affected node name
+        — the single ``_``-delimited token that equals the module's core
+        (e.g. ``arm`` in ``L_arm_collar_jInit`` or ``arm_collar_jInit_l`` or
+        ``arm_l_collar_jInit``) — and substitutes it with the new core.
+        This handles every builtin rule uniformly and extends to user-
+        defined rules that follow the same single-core convention.
 
         Args:
-            root_jnt (str): Current DAG name of the guide root joint. Used
-                to locate the module.
+            root_jnt (str): Current DAG name of the guide root joint.
             new_user_input (str): New name as typed by the user. May include
-                a side token prefix (``L_`` / ``R_`` / ``C_``) or not. If
-                present it must match the module's actual side, otherwise a
-                ``ValueError`` is raised — cross-side rename is intentionally
-                refused to keep semantics simple.
+                the active rule's side decoration or just be a bare core.
+                Cross-side rename is refused.
 
         Returns:
             dict: ``{"new_module_name", "new_root_jnt", "renamed_count"}``.
-            If the normalised new name equals the existing one, the function
-            is a no-op and returns ``renamed_count = 0``.
+            No-op when the re-styled new name equals the stored one.
 
         Raises:
-            ValueError: invalid or empty input, side-token mismatch, or any
-                target name already exists in the scene on a different node.
-                On error no rename is performed — the scene is left untouched.
+            ValueError: on invalid input, cross-side rename, reserved-token
+                collision, or pre-flight name conflict. No DAG change is
+                made in the error path.
         """
-        # --- Step A: normalise new_user_input into a '{side}_{core}' form ---
+        from ddrig.library import naming_rules
+        active_rule = naming_rules.get_active_rule()
+
+        # --- Step A: identify side and old_core ---
         if not new_user_input or not new_user_input.strip():
             raise ValueError("New module name is empty.")
-        new_user_input = new_user_input.strip()
+        new_input = new_user_input.strip()
 
         old_module_name = cmds.getAttr("%s.moduleName" % root_jnt)
-        # side is embedded as the first underscore-segment of moduleName;
-        # all DDRIG module names are produced by naming.parse([name], side=side)
-        # which yields '{side}_{core}'. We use that as the authoritative source
-        # because the joint's .side enum could theoretically drift from the
-        # DAG prefix — the DAG prefix is what downstream regex relies on.
-        side = old_module_name.split("_", 1)[0]
-        if side not in ("L", "R", "C"):
-            raise ValueError(
-                "Cannot parse side from existing module name %r" % old_module_name
-            )
 
-        if new_user_input.startswith(("L_", "R_", "C_")):
-            input_side, core = new_user_input.split("_", 1)
-            if input_side != side:
+        # .side enum is authoritative; fall back to leading token of
+        # moduleName only if the enum somehow lost its value.
+        side = joint.get_joint_side(root_jnt)
+        if side not in naming_rules.VALID_SIDES:
+            first_tok = old_module_name.split("_", 1)[0]
+            if first_tok in naming_rules.VALID_SIDES:
+                side = first_tok
+            else:
                 raise ValueError(
-                    "Side token mismatch: input has %r but module is %r. "
-                    "Cross-side rename is not supported." % (input_side, side)
+                    "Cannot determine side for module %r." % old_module_name
                 )
-        else:
-            core = new_user_input
 
-        if not core:
+        # Strip the active rule off the stored moduleName to get old_core.
+        # If the stored name was built under a different rule and strip
+        # fails, treat the whole name as the core — best-effort rename.
+        old_core = naming_rules.strip_side(old_module_name, side, active_rule)
+        if old_core is None:
+            old_core = old_module_name
+
+        # --- Step A2: parse user input into new_core ---
+        # First, reject cross-side input: does new_input match ANY
+        # other side's rule pattern (besides the module's own)?
+        for other_side in naming_rules.VALID_SIDES:
+            if other_side == side:
+                continue
+            other_cfg = active_rule["sides"].get(other_side, {}) if active_rule else {}
+            # "none" mode strips to the input unchanged, which would always
+            # "match" — that is not a genuine cross-side signal.
+            if other_cfg.get("mode") == "none":
+                continue
+            if naming_rules.strip_side(new_input, other_side, active_rule) is not None:
+                raise ValueError(
+                    "Input %r uses the %s-side decoration but the module "
+                    "is on %s. Cross-side rename is not supported." %
+                    (new_input, other_side, side)
+                )
+
+        # If the input already wears the current side's decoration, strip it.
+        self_cfg = active_rule["sides"].get(side, {}) if active_rule else {}
+        stripped_self = naming_rules.strip_side(new_input, side, active_rule)
+        if stripped_self is not None and self_cfg.get("mode") != "none":
+            new_core = stripped_self
+        else:
+            new_core = new_input
+
+        if not new_core:
             raise ValueError("New module name core part is empty.")
-        if "_" in core and any(tok in core.split("_") for tok in ("jInit", "guides", "locators", "grp")):
-            # reserved tokens inside the core would collide with the DAG suffix logic
+        if any(tok in new_core.split("_")
+               for tok in ("jInit", "guides", "locators", "grp")):
             raise ValueError(
                 "New module name core %r contains a reserved DDRIG token "
-                "(jInit/guides/locators/grp)." % core
+                "(jInit/guides/locators/grp)." % new_core
             )
 
-        new_module_name = "%s_%s" % (side, core)
+        new_module_name = naming_rules.apply_side(
+            side, [new_core], rule=active_rule
+        )
         if new_module_name == old_module_name:
             return {
                 "new_module_name": new_module_name,
@@ -613,21 +641,30 @@ class Initials(object):
                 raise ValueError("Cannot resolve UUID for %r" % path)
             return result[0]
 
-        old_prefix = old_module_name + "_"
-        new_prefix = new_module_name + "_"
-        nodes_to_rename = []  # list of (uuid, new_short_name)
+        def _substitute_core(name, old, new):
+            """Replace the leftmost ``_``-delimited token equal to ``old``
+            with ``new``. Returns None if ``old`` is not a token in ``name``.
+            """
+            tokens = name.split("_")
+            for i, tok in enumerate(tokens):
+                if tok == old:
+                    tokens[i] = new
+                    return "_".join(tokens)
+            return None
+
+        nodes_to_rename = []
 
         # B.1 root joint itself
         root_short = _short(root_jnt)
-        if not root_short.startswith(old_prefix):
+        root_new = _substitute_core(root_short, old_core, new_core)
+        if root_new is None:
             raise ValueError(
-                "Root joint %r does not start with expected prefix %r" %
-                (root_short, old_prefix)
+                "Root joint %r does not contain the module core %r as an "
+                "underscore-delimited token; cannot rename under the active "
+                "naming rule." % (root_short, old_core)
             )
         root_uuid = _uid(root_jnt)
-        nodes_to_rename.append(
-            (root_uuid, new_prefix + root_short[len(old_prefix):])
-        )
+        nodes_to_rename.append((root_uuid, root_new))
 
         # B.2 descendant joints in the guide chain
         descendants = cmds.listRelatives(
@@ -635,40 +672,44 @@ class Initials(object):
         ) or []
         for child in descendants:
             short = _short(child)
-            if short.startswith(old_prefix):
-                nodes_to_rename.append(
-                    (_uid(child), new_prefix + short[len(old_prefix):])
-                )
+            new_short = _substitute_core(short, old_core, new_core)
+            if new_short is not None:
+                nodes_to_rename.append((_uid(child), new_short))
 
         # B.3 ancestor limb group + its locators_grp sibling + locator leaves
         parent = cmds.listRelatives(root_jnt, parent=True, fullPath=True)
         while parent:
             parent_short = _short(parent[0])
-            if parent_short == "%s_guides" % old_module_name:
-                nodes_to_rename.append(
-                    (_uid(parent[0]), "%s_guides" % new_module_name)
-                )
-                siblings = cmds.listRelatives(
-                    parent[0], children=True, fullPath=True
-                ) or []
-                for sib in siblings:
-                    sib_short = _short(sib)
-                    if sib_short == "%s_locators_grp" % old_module_name:
-                        nodes_to_rename.append(
-                            (_uid(sib), "%s_locators_grp" % new_module_name)
-                        )
-                        loc_children = cmds.listRelatives(
-                            sib, children=True, fullPath=True
-                        ) or []
-                        loc_old_prefix = "loc_" + old_prefix
-                        loc_new_prefix = "loc_" + new_prefix
-                        for loc in loc_children:
-                            loc_short = _short(loc)
-                            if loc_short.startswith(loc_old_prefix):
-                                nodes_to_rename.append(
-                                    (_uid(loc),
-                                     loc_new_prefix + loc_short[len(loc_old_prefix):])
-                                )
+            # Limb group: a node whose name ends with '_guides' AND contains
+            # our core as an inner token. That matches prefix/suffix/mid
+            # rule-styled limb groups uniformly.
+            if parent_short.endswith("_guides"):
+                limb_new = _substitute_core(parent_short, old_core, new_core)
+                if limb_new is not None:
+                    nodes_to_rename.append((_uid(parent[0]), limb_new))
+                    siblings = cmds.listRelatives(
+                        parent[0], children=True, fullPath=True
+                    ) or []
+                    for sib in siblings:
+                        sib_short = _short(sib)
+                        if sib_short.endswith("_locators_grp"):
+                            sib_new = _substitute_core(
+                                sib_short, old_core, new_core
+                            )
+                            if sib_new is not None:
+                                nodes_to_rename.append((_uid(sib), sib_new))
+                                loc_children = cmds.listRelatives(
+                                    sib, children=True, fullPath=True
+                                ) or []
+                                for loc in loc_children:
+                                    loc_short = _short(loc)
+                                    loc_new = _substitute_core(
+                                        loc_short, old_core, new_core
+                                    )
+                                    if loc_new is not None:
+                                        nodes_to_rename.append(
+                                            (_uid(loc), loc_new)
+                                        )
                 break
             parent = cmds.listRelatives(parent[0], parent=True, fullPath=True)
 

@@ -314,11 +314,19 @@ def strip_side(name, side, rule):
             return name[:-len(needle)]
         return None
     if mode == "mid":
+        # Standard case: the token lives between two tokens and is wrapped
+        # in separators on both sides, e.g. "arm_l_collar".
         needle = sep + token + sep
         idx = name.find(needle)
-        if idx == -1:
-            return None
-        # Collapse the infix back to a single separator so the two halves
-        # re-join naturally.
-        return name[:idx] + sep + name[idx + len(needle):]
+        if idx != -1:
+            # Collapse the infix back to a single separator so the halves
+            # re-join naturally.
+            return name[:idx] + sep + name[idx + len(needle):]
+        # Degenerate case: apply_side with a single-label build produces
+        # "{label}_{token}" — the token lands at the tail.  Accept that
+        # so strip_side is a true inverse of apply_side.
+        tail = sep + token
+        if name.endswith(tail):
+            return name[:-len(tail)]
+        return None
     return None
