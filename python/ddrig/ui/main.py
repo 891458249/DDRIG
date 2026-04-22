@@ -637,6 +637,16 @@ class MainUI(QtWidgets.QMainWindow):
         menu_tools.addAction(clean_orphan_guides_action)
         clean_orphan_guides_action.triggered.connect(self.on_clean_orphan_guides)
 
+        ue_skeleton_action = QtWidgets.QAction(
+            self, text="Build UE Skeleton..."
+        )
+        ue_skeleton_action.setToolTip(
+            "Build a parallel hierarchical skeleton from the flat _jDef "
+            "joints so the scene exports cleanly to UE / Unity"
+        )
+        menu_tools.addAction(ue_skeleton_action)
+        ue_skeleton_action.triggered.connect(self.on_open_ue_skeleton_dialog)
+
         menubar.addAction(menu_tools.menuAction())
 
         # HELP Main Menu
@@ -2083,6 +2093,28 @@ class MainUI(QtWidgets.QMainWindow):
             # combo) -- refresh so the user sees the result.
             self._refresh_naming_rule_combo()
             self.statusbar.showMessage("Reset complete.", 5000)
+
+    # ---- Tools > Build UE Skeleton... handler -----------------------------
+
+    def on_open_ue_skeleton_dialog(self):
+        """Open the UE Skeleton dialog non-modally.
+
+        Stored on ``self`` so subsequent invocations raise the existing
+        window instead of stacking duplicate copies, and so the user
+        can keep it open while interacting with Maya."""
+        from ddrig.tools.ue_skeleton.ui import UESkeletonDialog
+        existing = getattr(self, "_ue_skeleton_dialog", None)
+        if existing is not None:
+            try:
+                existing.close()
+                existing.deleteLater()
+            except RuntimeError:
+                # Underlying C++ object may already be gone after a
+                # previous close; just drop the reference.
+                pass
+        self._ue_skeleton_dialog = UESkeletonDialog(self)
+        self._ue_skeleton_dialog.show()
+        self._ue_skeleton_dialog.raise_()
 
     # ---- /Help > Reset handler --------------------------------------------
 
