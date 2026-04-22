@@ -75,6 +75,31 @@ _CROSS_MODULE_PLACEHOLDER = "@cross_module_parent"
 
 
 # ---------------------------------------------------------------------------
+# IK-helper guide blacklist
+# ---------------------------------------------------------------------------
+# Some DDRIG modules declare guide joints that are NOT part of the deform
+# chain -- they are IK pivots / control helpers used only by the rig's
+# control system (e.g. leg's BankIN / BankOUT / HeelPV / ToePV drive the
+# foot-roll IK but never participate in skinning).
+#
+# Without filtering these out, build_ue_skeleton duplicates them into the
+# UE skeleton, where they are useless and clutter the hierarchy.
+#
+# Each entry maps a module_type (as returned by joint.identify -> the
+# ``module_type`` field of get_scene_roots) to the set of guide joint
+# TYPE NAMES (as returned by joint.get_joint_type, via the .otherType
+# string attr for non-standard types) that should be excluded from the
+# UE skeleton regardless of source / granularity.
+#
+# Expand this table as new modules reveal IK-only guide roles.
+_HELPER_GUIDE_TYPES_BY_MODULE = {
+    "leg": {"BankIN", "BankOUT", "HeelPV", "ToePV"},
+    # arm / hindleg / spine / head / etc. have no IK-only guide joints
+    # -- every guide in those chains participates in deformation.
+}
+
+
+# ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 
@@ -369,6 +394,54 @@ def _mirror_animation(jdef, jue):
 # Module sequence planning
 # ---------------------------------------------------------------------------
 
+def _filter_deform_guides(guide_chain, guide_parent_map, module_type):
+    """Drop IK-helper guides from ``guide_chain`` per
+    :data:`_HELPER_GUIDE_TYPES_BY_MODULE` and rewire
+    ``guide_parent_map`` so each surviving guide's parent is the
+    nearest surviving ancestor (or None when the original chain root
+    itself was dropped -- impossible in practice, but handled).
+
+    Returns ``(filtered_chain, repaired_parent_map, filtered_out_list)``.
+    A guide is filtered out iff ``joint.get_joint_type(g)`` returns a
+    name present in the module's helper set.  Reading the joint type
+    is a Maya call; failures (e.g. the attribute is missing) fall back
+    to "keep the guide" to avoid accidentally dropping real deform
+    chain members.
+    """
+    helpers = _HELPER_GUIDE_TYPES_BY_MODULE.get(module_type, set())
+    if not helpers:
+        return list(guide_chain), dict(guide_parent_map), []
+
+    # Import lazily -- joint library touches cmds at module scope,
+    # which is fine inside Maya but we keep it defensive.
+    from ddrig.library import joint as joint_lib
+
+    filtered_out = set()
+    for g in guide_chain:
+        try:
+            jt = joint_lib.get_joint_type(g)
+        except Exception:   # noqa: BLE001
+            jt = None
+        if jt in helpers:
+            filtered_out.add(g)
+
+    if not filtered_out:
+        return list(guide_chain), dict(guide_parent_map), []
+
+    keep_chain = [g for g in guide_chain if g not in filtered_out]
+    keep_set = set(keep_chain)
+    repaired = {}
+    for g in keep_chain:
+        p = guide_parent_map.get(g)
+        # Walk up through filtered-out ancestors until we find a surviving
+        # parent or exhaust the chain.
+        while p is not None and p not in keep_set:
+            p = guide_parent_map.get(p)
+        if p is not None:
+            repaired[g] = p
+    return keep_chain, repaired, sorted(filtered_out)
+
+
 def _plan_module_sequence(module, use_rig, granularity, suffix):
     """Produce an ordered list of jUE creation records for one module.
 
@@ -382,11 +455,18 @@ def _plan_module_sequence(module, use_rig, granularity, suffix):
             "guide_src": <guide short name> OR None (main jUEs only),
         }
 
+    Also returns the list of guide joints filtered out as IK helpers
+    (via _HELPER_GUIDE_TYPES_BY_MODULE) so callers can log them.
+
     The order is "root first"; creating them in order respects parent
     references within the same module.
     """
-    guide_chain = module["guide_chain"]
-    guide_parent_map = module["guide_parent_map"]
+    module_type = module["info"]["module_type"]
+    guide_chain, guide_parent_map, filtered_helpers = _filter_deform_guides(
+        module["guide_chain"],
+        module["guide_parent_map"],
+        module_type,
+    )
     main_jdef_of_guide, twist_jdefs = _partition_jdefs(
         guide_chain, module["jdefs"] if use_rig else []
     )
@@ -434,7 +514,7 @@ def _plan_module_sequence(module, use_rig, granularity, suffix):
         })
         guide_to_jue_in_module[g] = jue_name
 
-    return sequence
+    return sequence, filtered_helpers
 
 
 def _per_module_source_decision(module, source):
@@ -554,7 +634,16 @@ def build_ue_skeleton(
             skipped.append((mod_name, note))
             continue
 
-        sequence = _plan_module_sequence(m, use_rig, granularity, suffix)
+        sequence, filtered_helpers = _plan_module_sequence(
+            m, use_rig, granularity, suffix
+        )
+        if filtered_helpers:
+            # Annotate module_status so the dialog log can show how many
+            # IK-helper guides were deliberately excluded.
+            module_status[mod_name] = (
+                "%s; skipped %d IK helper(s): %s" %
+                (note, len(filtered_helpers), ", ".join(filtered_helpers))
+            )
         if not sequence:
             module_chains[mod_name] = []
             continue
