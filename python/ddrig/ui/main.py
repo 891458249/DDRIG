@@ -110,40 +110,74 @@ def launch(force=False, disable_version_control=False):
 
 
 class NamingRuleDialog(QtWidgets.QDialog):
-    """Modal dialog for composing or editing a user-defined naming rule.
+    """Modal dialog for composing or editing a naming rule -- three modes.
 
-    Modes:
-        New mode   (rule is None)           -- calls naming_rules.save_rule.
-        Edit mode  (rule is dict, original_name is str)
-                                            -- calls naming_rules.update_rule
-                                               with the original name so the
-                                               old file is removed on rename.
+    Mode is determined by the constructor arguments:
 
-    Fields:
-        Name, Description (free text)
-        Three rows -- one per side (L/R/C) -- each with:
-            Mode QComboBox (prefix / suffix / mid / none)
-            Token QLineEdit  (disabled when mode == 'none')
-            Separator QLineEdit, defaults to '_'  (disabled when mode == 'none')
+        rule=None,      original_name=None   -> 'blank'
+            Empty form for a new user rule.  An extra 'Based on'
+            dropdown is shown so the user can optionally pre-fill from
+            any existing rule (builtin or user) without having to type
+            every field from scratch.
 
-    On OK, errors are surfaced via QMessageBox and keep the dialog open so
-    the user can fix the input without losing their typed values.
+        rule=dict,      original_name=None   -> 'duplicate'
+            Fields pre-filled from ``rule`` but the name field is left
+            empty so the user must type a fresh (non-colliding) name.
+            Always saves as a new user rule.
+
+        rule=dict,      original_name=str    -> 'edit'
+            Edit an existing rule in place.  Fields pre-filled from
+            ``rule``.  If the rule is builtin, the name field is
+            readOnly -- update_rule forbids renaming builtins, so the
+            UI forbids typing it too.
+
+    On OK, errors are surfaced via QMessageBox and keep the dialog open
+    so the user can fix the input without losing their typed values.
     """
 
     def __init__(self, parent=None, rule=None, original_name=None):
         super(NamingRuleDialog, self).__init__(parent)
-        self._edit_mode = rule is not None
+        if rule is None:
+            self._mode = "blank"
+            title = "New Naming Rule"
+        elif original_name is None:
+            self._mode = "duplicate"
+            title = "New Naming Rule (from template)"
+        else:
+            self._mode = "edit"
+            title = "Edit Naming Rule -- %s" % original_name
         self._original_name = original_name
-        self.setWindowTitle(
-            "Edit Naming Rule" if self._edit_mode else "New Naming Rule"
-        )
+        self._is_builtin = bool(rule) and rule.get("builtin", False)
+        self.setWindowTitle(title)
         self.setMinimumWidth(460)
         self._build_ui()
-        if rule is not None:
+        if self._mode == "duplicate":
+            # Prefill fields from template but clear the name so the
+            # user must give it a new one.
+            self._prefill(rule, clear_name=True)
+        elif self._mode == "edit":
             self._prefill(rule)
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
+
+        # Blank-mode 'Based on' dropdown -- only rendered when starting
+        # from scratch so it does not clutter Edit / Duplicate flows.
+        if self._mode == "blank":
+            based_lay = QtWidgets.QHBoxLayout()
+            based_lay.addWidget(QtWidgets.QLabel("Based on"))
+            self.based_on_combo = QtWidgets.QComboBox()
+            self.based_on_combo.addItem("- (blank) -", userData=None)
+            from ddrig.library import naming_rules
+            for r in naming_rules.list_rules():
+                self.based_on_combo.addItem(r["name"], userData=r["name"])
+            self.based_on_combo.currentIndexChanged.connect(
+                self._on_based_on_changed
+            )
+            based_lay.addWidget(self.based_on_combo, 1)
+            layout.addLayout(based_lay)
+        else:
+            self.based_on_combo = None
 
         form = QtWidgets.QFormLayout()
         self.name_le = QtWidgets.QLineEdit()
@@ -192,11 +226,32 @@ class NamingRuleDialog(QtWidgets.QDialog):
         token_le.setEnabled(enabled)
         sep_le.setEnabled(enabled)
 
-    def _prefill(self, rule):
-        """Populate every widget from an existing rule dict. Used by
-        Edit mode. Called once after _build_ui(), before the dialog is
-        shown, so no currentTextChanged feedback loops are observable."""
-        self.name_le.setText(rule.get("name", ""))
+    def _on_based_on_changed(self, index):
+        """Blank-mode only: prefill fields from the chosen template rule.
+        Always leaves the name field empty so the user must type a new
+        (non-colliding) name of their own."""
+        if self.based_on_combo is None:
+            return
+        template_name = self.based_on_combo.currentData()
+        if not template_name:
+            return
+        from ddrig.library import naming_rules
+        rule = naming_rules.get_rule(template_name)
+        if rule is None:
+            return
+        self._prefill(rule, clear_name=True)
+
+    def _prefill(self, rule, clear_name=False):
+        """Populate every widget from an existing rule dict.
+
+        Called by Edit mode (with clear_name=False so the existing name
+        shows up) and by Duplicate / Based-on (with clear_name=True so
+        the user is forced to type a fresh name).
+
+        Also manages the name field's readOnly state so builtin rules
+        cannot be renamed via the Dialog (matching update_rule's own
+        server-side refusal)."""
+        self.name_le.setText("" if clear_name else rule.get("name", ""))
         self.desc_le.setText(rule.get("description", ""))
         sides = rule.get("sides", {})
         for side, (mode_cb, token_le, sep_le) in self.side_rows.items():
@@ -211,6 +266,19 @@ class NamingRuleDialog(QtWidgets.QDialog):
             # if setCurrentIndex did not emit currentTextChanged (Qt
             # suppresses the signal when the index was already selected).
             self._on_mode_changed(side, mode)
+        # Builtin edit: forbid typing in the name field.  Non-builtin
+        # edit, duplicate, and blank always allow name entry.
+        if self._mode == "edit" and self._is_builtin:
+            self.name_le.setReadOnly(True)
+            self.name_le.setToolTip(
+                "Builtin rule names cannot be changed.\n"
+                "Edit updates rule content in place.\n"
+                "Use 'New...' with 'Based on' to create a differently-named "
+                "variant of a builtin."
+            )
+        else:
+            self.name_le.setReadOnly(False)
+            self.name_le.setToolTip("")
 
     def _collect_rule(self):
         rule = {
@@ -232,9 +300,10 @@ class NamingRuleDialog(QtWidgets.QDialog):
         from ddrig.library import naming_rules
         rule = self._collect_rule()
         try:
-            if self._edit_mode:
+            if self._mode == "edit":
                 naming_rules.update_rule(self._original_name, rule)
             else:
+                # blank and duplicate both save as a new user rule.
                 naming_rules.save_rule(rule)
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Save failed", str(exc))
@@ -246,6 +315,111 @@ class NamingRuleDialog(QtWidgets.QDialog):
 # NewNamingRuleDialog.  Keep the old name resolvable so any stray
 # import or user snippet does not break.
 NewNamingRuleDialog = NamingRuleDialog
+
+
+class ResetDialog(QtWidgets.QDialog):
+    """Help > Reset...  -- checkbox list driven by ddrig.core.reset_registry.
+
+    Enumerates every registered ResetItem as a checkbox row.  On OK the
+    checked items' ``action`` callables fire in registration order.
+    Successes and failures are reported back in a summary dialog.
+    """
+
+    def __init__(self, parent=None):
+        super(ResetDialog, self).__init__(parent)
+        self.setWindowTitle("Reset DDRIG Settings")
+        self.setMinimumWidth(520)
+        self._checkboxes = {}   # key -> QCheckBox
+        self._build_ui()
+
+    def _build_ui(self):
+        from ddrig.core import reset_registry
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel(
+            "Select which DDRIG features to restore to defaults:"
+        ))
+
+        items = reset_registry.items()
+        if not items:
+            empty = QtWidgets.QLabel(
+                "  (No reset-able features are currently registered.)"
+            )
+            empty.setStyleSheet("color: gray;")
+            layout.addWidget(empty)
+        else:
+            for item in items:
+                cb = QtWidgets.QCheckBox(item.label)
+                cb.setChecked(item.default_checked)
+                cb.setToolTip(item.description)
+                layout.addWidget(cb)
+                desc_lbl = QtWidgets.QLabel("    " + item.description)
+                desc_lbl.setWordWrap(True)
+                desc_lbl.setStyleSheet("color: gray; font-size: 10px;")
+                layout.addWidget(desc_lbl)
+                self._checkboxes[item.key] = cb
+
+        layout.addStretch(1)
+
+        buttons = QtWidgets.QDialogButtonBox()
+        self._reset_btn = buttons.addButton(
+            "Reset Selected", QtWidgets.QDialogButtonBox.AcceptRole
+        )
+        buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_reset)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_reset(self):
+        from ddrig.core import reset_registry
+        selected = [k for k, cb in self._checkboxes.items() if cb.isChecked()]
+        if not selected:
+            QtWidgets.QMessageBox.information(
+                self, "Reset", "No items selected."
+            )
+            return
+
+        preview_lines = []
+        for k in selected:
+            item = reset_registry.get(k)
+            if item is not None:
+                preview_lines.append("  - " + item.label)
+        reply = QtWidgets.QMessageBox.warning(
+            self,
+            "Reset selected",
+            "The following will be reset to defaults:\n\n%s\n\nContinue?"
+            % "\n".join(preview_lines),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel,
+            QtWidgets.QMessageBox.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        successes, failures = [], []
+        for key in selected:
+            item = reset_registry.get(key)
+            if item is None:
+                failures.append((key, "item disappeared from registry"))
+                continue
+            try:
+                item.action()
+                successes.append(item.label)
+            except Exception as exc:   # noqa: BLE001
+                failures.append((item.label, str(exc)))
+
+        parts = []
+        if successes:
+            parts.append("Succeeded:\n"
+                         + "\n".join("  + " + s for s in successes))
+        if failures:
+            parts.append("Failed:\n"
+                         + "\n".join("  - %s: %s" % (lbl, err)
+                                     for lbl, err in failures))
+        QtWidgets.QMessageBox.information(
+            self, "Reset complete",
+            "\n\n".join(parts) if parts else "(nothing done)",
+        )
+        self.accept()
 
 
 class MainUI(QtWidgets.QMainWindow):
@@ -464,6 +638,19 @@ class MainUI(QtWidgets.QMainWindow):
         clean_orphan_guides_action.triggered.connect(self.on_clean_orphan_guides)
 
         menubar.addAction(menu_tools.menuAction())
+
+        # HELP Main Menu
+        menu_help = QtWidgets.QMenu(menubar)
+        menu_help.setTitle("Help")
+
+        reset_action = QtWidgets.QAction(self, text="Reset...")
+        reset_action.setToolTip(
+            "Selectively restore DDRIG features to their bundled defaults"
+        )
+        menu_help.addAction(reset_action)
+        reset_action.triggered.connect(self.on_open_reset_dialog)
+
+        menubar.addAction(menu_help.menuAction())
 
         # Status BAR
         self.statusbar = QtWidgets.QStatusBar(self)
@@ -1761,15 +1948,19 @@ class MainUI(QtWidgets.QMainWindow):
         self._update_naming_edit_delete_buttons_enabled()
 
     def _update_naming_edit_delete_buttons_enabled(self):
-        """Gate Edit and Delete buttons on 'is the selection a user
-        (non-builtin) rule?'. Builtins are read-only -- duplicate via
-        New to get a starting point for a variation."""
+        """Gate Edit and Delete buttons on 'is a valid rule selected?'.
+
+        Builtin-vs-user is handled inside the handlers (smart
+        degradation): Edit opens in-place edit for both, Delete gives
+        a pointer to Edit / Help > Reset when the target is builtin.
+        Keeping the buttons lit avoids the dead-control UX that greying
+        out would produce."""
         from ddrig.library import naming_rules
         name = self.naming_rule_combo.currentData()
         rule = naming_rules.get_rule(name) if name else None
-        is_user_rule = bool(rule) and not rule.get("builtin", False)
-        self.naming_delete_rule_btn.setEnabled(is_user_rule)
-        self.naming_edit_rule_btn.setEnabled(is_user_rule)
+        enabled = rule is not None
+        self.naming_delete_rule_btn.setEnabled(enabled)
+        self.naming_edit_rule_btn.setEnabled(enabled)
 
     def on_naming_rule_changed(self, index):
         """Combo index changed -- preview selection only, do NOT persist.
@@ -1817,16 +2008,10 @@ class MainUI(QtWidgets.QMainWindow):
                 self, "Edit naming rule", "Rule %r not found." % name
             )
             return
-        if rule.get("builtin", False):
-            # The Enable-state gate is the primary barrier; this
-            # defensive branch guards against race conditions where the
-            # enabled state lagged behind a rule-file change on disk.
-            QtWidgets.QMessageBox.information(
-                self, "Edit naming rule",
-                "Builtin rules are read-only.  Use New... to create a "
-                "variation of a builtin rule.",
-            )
-            return
+        # Unified edit path -- both builtin and user go through edit mode.
+        # The Dialog handles builtin specifics internally (name readOnly)
+        # and update_rule enforces the same rule server-side (refuses
+        # rename on builtin).
         dialog = NamingRuleDialog(self, rule=rule, original_name=name)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
             self._refresh_naming_rule_combo()
@@ -1835,10 +2020,32 @@ class MainUI(QtWidgets.QMainWindow):
             )
 
     def on_naming_delete_rule(self):
+        """Delete handler with smart degradation for builtin rules.
+
+        Builtin: show an info dialog pointing at Edit (for content
+        tweaks) and Help > Reset (for restoring bundled defaults).  No
+        file is touched.
+
+        User rule: the pre-Commit-7 confirm-then-delete flow, unchanged.
+        """
         from ddrig.library import naming_rules
         name = self.naming_rule_combo.currentData()
         if not name:
             return
+        rule = naming_rules.get_rule(name)
+        if rule is None:
+            return
+
+        if rule.get("builtin", False):
+            QtWidgets.QMessageBox.information(
+                self, "Delete naming rule",
+                "'%s' is a builtin rule and cannot be deleted.\n\n"
+                "  - To modify its content, use the 'Edit...' button.\n"
+                "  - To restore builtin defaults, use Help > Reset..."
+                % name,
+            )
+            return
+
         reply = QtWidgets.QMessageBox.question(
             self,
             "Delete naming rule",
@@ -1859,6 +2066,25 @@ class MainUI(QtWidgets.QMainWindow):
         self.statusbar.showMessage("Rule %r deleted." % name, 5000)
 
     # ---- /Naming rule panel handlers --------------------------------------
+
+    # ---- Help > Reset handler ---------------------------------------------
+
+    def on_open_reset_dialog(self):
+        """Open the Reset... dialog (Help menu).
+
+        Explicitly imports ddrig.library.naming_rules first so its
+        side-effect registration into ddrig.core.reset_registry fires
+        even if nothing else has imported it yet in the current Maya
+        session.  Future reset sources should be imported here too."""
+        from ddrig.library import naming_rules  # noqa: F401
+        dialog = ResetDialog(self)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            # Some reset actions affect UI state (e.g. the naming-rule
+            # combo) -- refresh so the user sees the result.
+            self._refresh_naming_rule_combo()
+            self.statusbar.showMessage("Reset complete.", 5000)
+
+    # ---- /Help > Reset handler --------------------------------------------
 
     def update_properties(self, property, value):
         root_jnt = self.guides_list_treeWidget.currentItem().text(2)
