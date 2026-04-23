@@ -435,10 +435,12 @@ class UESkeletonDialog(QtWidgets.QDialog):
 
     def on_dump_detection_report(self):
         """Log what the detection layer sees right now, without
-        building.  Lets the user verify every module is recognised as
-        built -- if a module shows NOT BUILT here but the user thinks
-        it IS built, they know to Test Build it again (or that
-        def_jointsSet is missing for some reason)."""
+        building.  For each module lists its deform joints and the
+        immediate parent transform each lives under, so the user can
+        verify the DAG-ancestor scan attributed them correctly
+        (especially for modules whose deforms nest under
+        scale_grp / nonScale_grp / sub-module grps)."""
+        from maya import cmds
         try:
             report = builder.detection_report()
         except Exception:   # noqa: BLE001
@@ -450,16 +452,28 @@ class UESkeletonDialog(QtWidgets.QDialog):
             return
         for entry in report:
             mn = entry["module_name"]
-            if entry["has_rig"]:
-                deforms = entry["deforms"]
+            if not entry["has_rig"]:
                 self._log(
-                    "  %-28s BUILT     %2d guides  %2d deform  examples: %s" %
-                    (mn, entry["guide_count"], len(deforms),
-                     ", ".join(deforms[:3]) + (", ..." if len(deforms) > 3 else ""))
+                    "  %s: NOT BUILT  (%d guides; limbGrp %r missing or empty)"
+                    % (mn, entry["guide_count"], mn)
                 )
-            else:
-                self._log(
-                    "  %-28s NOT BUILT %2d guides   (no deform joints found under "
-                    "def_jointsSet_* for prefix %r)" %
-                    (mn, entry["guide_count"], mn + "_")
-                )
+                continue
+            deforms = entry["deforms"]
+            self._log(
+                "  %s: BUILT  (%d guides, %d deform)" %
+                (mn, entry["guide_count"], len(deforms))
+            )
+            # Show up to 15 deform joints with their immediate parent
+            # transform, so the user can spot joints that landed under
+            # an unexpected sub-group.
+            for d in deforms[:15]:
+                try:
+                    parents = cmds.listRelatives(
+                        d, parent=True, fullPath=False
+                    ) or []
+                except RuntimeError:
+                    parents = []
+                parent = parents[0] if parents else "?"
+                self._log("    - %s  (under %s)" % (d, parent))
+            if len(deforms) > 15:
+                self._log("    ... (%d more)" % (len(deforms) - 15))

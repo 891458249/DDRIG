@@ -200,10 +200,72 @@ def _is_helper_joint(short_name):
     return any(tok in padded for tok in _HELPER_TOKENS)
 
 
+def _find_limb_grp(module_name):
+    """Return the full DAG path of the module's limbGrp transform.
+
+    Per ``core/module.py:65``, every module creates a top-level
+    transform named exactly ``module_name`` (via
+    ``naming.parse([self.module_name])`` with no side, which collapses
+    to the module_name verbatim under any naming rule) to house all
+    its rig groups -- scale_grp, nonScale_grp, defJoints_grp,
+    rigJoints_grp, and nested sub-module grps from spline modules.
+
+    Returns None if no matching transform exists (module not built, or
+    limbGrp was renamed by the user)."""
+    candidates = cmds.ls(module_name, long=True) or []
+    for c in candidates:
+        try:
+            if cmds.objectType(c) == "transform":
+                return c
+        except RuntimeError:
+            continue
+    return None
+
+
+def _iter_ancestor_shorts(node_path):
+    """Yield the short names of every ancestor of ``node_path`` (NOT
+    including the node itself).  ``node_path`` must be a full DAG path
+    (starts with ``|``).  Used to veto joints living under certain
+    sub-grps (e.g. ``*_rigJoints_grp``) without resolving every
+    parent via separate Maya calls."""
+    parts = node_path.strip("|").split("|")
+    for p in parts[:-1]:
+        yield p
+
+
+def _legacy_prefix_scan(module_name):
+    """Fallback when the module's limbGrp cannot be located -- mirrors
+    the pre-DAG detection that Commit 4bdcb69 shipped.  Keeps us
+    working if the user renamed the limbGrp manually."""
+    jdef_hits = cmds.ls(module_name + "_*_jDef", type="joint") or []
+    j_raw = cmds.ls(module_name + "_*_j", type="joint") or []
+    j_hits = [j for j in j_raw if not _is_helper_joint(_short(j))]
+    base_singleton = []
+    base_cand = module_name + "_j"
+    if cmds.objExists(base_cand):
+        try:
+            if cmds.objectType(base_cand) == "joint":
+                base_singleton.append(base_cand)
+        except RuntimeError:
+            pass
+    # Dedup while preserving order.
+    seen = set()
+    out = []
+    for n in jdef_hits + j_hits + base_singleton:
+        s = _short(n)
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def _deform_set_members():
     """Return every joint in any ``def_jointsSet_*`` objectSet, as
-    short names, deduplicated.  Returns [] when no such set exists
-    (scene has no built rigs)."""
+    short names, deduplicated.  Retained for diagnostics: Commit 4bdcb69
+    used this as the authoritative source, but the DAG-ancestor scan
+    in :func:`collect_module_deform_joints` is now primary because it
+    catches deform joints whose names do not carry the module's prefix
+    (spine's ``Spine_spine_0_jDef``, head's ``neckSplineIK_head_0_jDef``)."""
     sets = cmds.ls("def_jointsSet_*", type="objectSet") or []
     seen = set()
     out = []
@@ -217,37 +279,59 @@ def _deform_set_members():
     return out
 
 
-def _module_deform_members(module_name, all_members=None):
-    """Filter ``_deform_set_members`` down to the entries belonging to
-    ``module_name``.  Membership test: exact match on ``module_name``
-    or leading ``module_name + '_'``.
+def collect_module_deform_joints(module_name):
+    """Return all deform joints attributable to ``module_name`` by DAG
+    ancestry, as short names.  Matches joints whose limbGrp ancestor
+    is the module's top transform, regardless of intermediate grp
+    naming (scale_grp / nonScale_grp / defJoints_grp / nested
+    sub-module grps).
 
-    Helper joints (IK/FK/plug/etc.) that accidentally wound up in the
-    deform set are filtered out here too -- defence in depth against
-    a module that mis-registers a helper."""
-    if all_members is None:
-        all_members = _deform_set_members()
-    prefix = module_name + "_"
-    picked = []
-    for m in all_members:
-        if m == module_name or m.startswith(prefix):
-            if _is_helper_joint(m):
+    Filtering:
+        * ``*_jDef`` joints are accepted unconditionally -- DDRIG's
+          explicit deform marker.
+        * ``*_j`` joints are accepted only if they pass
+          :func:`_is_helper_joint` AND are NOT descendants of a
+          ``*_rigJoints_grp`` (which houses rig control internals
+          using the same ``_j`` suffix as base's singleton deform).
+        * Other suffixes are ignored.
+
+    When the limbGrp cannot be located (module not built, or its name
+    was changed), falls back to :func:`_legacy_prefix_scan` -- the
+    pre-DAG prefix string match."""
+    limb_grp = _find_limb_grp(module_name)
+    if limb_grp is None:
+        return _legacy_prefix_scan(module_name)
+
+    all_joints = cmds.listRelatives(
+        limb_grp, allDescendents=True, type="joint", fullPath=True
+    ) or []
+    seen = set()
+    out = []
+    for j in all_joints:
+        short = _short(j)
+        if short in seen:
+            continue
+        if short.endswith(JDEF_SUFFIX):
+            seen.add(short)
+            out.append(short)
+            continue
+        if short.endswith("_j") and not _is_helper_joint(short):
+            # Exclude rig-internal joints that happen to use the _j
+            # suffix -- those live under *_rigJoints_grp.  Descending
+            # into a module's own rigJoints_grp would sweep FK/IK
+            # control joints into the deform bucket.
+            ancestors = list(_iter_ancestor_shorts(j))
+            if any(a.endswith("_rigJoints_grp") for a in ancestors):
                 continue
-            picked.append(m)
-    return picked
+            seen.add(short)
+            out.append(short)
+    return out
 
 
-def module_has_rig(module_name, all_members=None):
-    """Public: True iff ``module_name`` contributed at least one joint
-    to the scene's deform-joint objectSet (i.e. was Test Built)."""
-    return bool(_module_deform_members(module_name, all_members=all_members))
-
-
-def collect_module_deform_joints(module_name, all_members=None):
-    """Public: every deform joint belonging to ``module_name``, as
-    short names, in objectSet registration order (close to build
-    order)."""
-    return _module_deform_members(module_name, all_members=all_members)
+def module_has_rig(module_name):
+    """Public: True iff ``module_name``'s limbGrp contains at least
+    one deform joint (i.e. the module has been Test Built)."""
+    return len(collect_module_deform_joints(module_name)) > 0
 
 
 def find_deform_for_guide(guide_name, module_name, module_deforms=None):
@@ -353,17 +437,15 @@ def _collect_modules():
 
     module_root_set = {r["root_joint"] for r in scene_roots}
 
-    # Query the scene-wide deform objectSet once; slice per module.
-    all_deform_members = _deform_set_members()
-
     modules = []
     for info in scene_roots:
         guide_root = info["root_joint"]
         module_name = info["module_name"]
         chain, parent_map = _guide_chain_for_module(guide_root, module_root_set)
-        module_deforms = _module_deform_members(
-            module_name, all_members=all_deform_members
-        )
+        # DAG-ancestor scan through the module's limbGrp: catches every
+        # deform joint parented anywhere inside (scale_grp / nonScale_grp
+        # / defJoints_grp / nested spline-IK sub-module grps).
+        module_deforms = collect_module_deform_joints(module_name)
         modules.append({
             "info": info,
             "guide_root": guide_root,
@@ -371,9 +453,7 @@ def _collect_modules():
             "guide_parent_map": parent_map,
             "has_rig": bool(module_deforms),
             "deforms": module_deforms,
-            # Kept as a legacy alias so any old caller reading 'jdefs' still
-            # sees the same data (now sourced from def_jointsSet instead of
-            # defJointsGrp scanning).
+            # Legacy alias -- some older callers read 'jdefs'.
             "jdefs": module_deforms,
         })
     return modules
@@ -719,22 +799,36 @@ def _per_module_source_decision(module, source):
 # Public API
 # ---------------------------------------------------------------------------
 
-def delete_ue_skeleton(group_name=UE_GROUP):
-    """Remove the UE skeleton group and everything beneath it.  Source
-    `_jDef`, guides, and skin clusters are untouched.  Returns True if
-    something was removed."""
+def _delete_ue_skeleton_impl(group_name):
+    """Unwrapped delete -- does not open its own undo chunk (callers
+    that want to group delete + build must open a single chunk
+    themselves)."""
     if cmds.objExists(group_name):
         cmds.delete(group_name)
         return True
     return False
 
 
-def build_ue_skeleton(
-    source="auto",
-    granularity="main",
-    root_name=UE_ROOT,
-    group_name=UE_GROUP,
-    suffix=UE_SUFFIX,
+def delete_ue_skeleton(group_name=UE_GROUP):
+    """Remove the UE skeleton group and everything beneath it.  Source
+    `_jDef`, guides, and skin clusters are untouched.  Returns True if
+    something was removed.
+
+    Wrapped in a single undo chunk so Ctrl+Z revives the skeleton in
+    one step."""
+    cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_delete_skeleton")
+    try:
+        return _delete_ue_skeleton_impl(group_name)
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+
+def _build_ue_skeleton_impl(
+    source,
+    granularity,
+    root_name,
+    group_name,
+    suffix,
 ):
     """Build a parallel UE-compatible skeleton.
 
@@ -920,6 +1014,31 @@ def build_ue_skeleton(
     }
 
 
+def build_ue_skeleton(
+    source="auto",
+    granularity="main",
+    root_name=UE_ROOT,
+    group_name=UE_GROUP,
+    suffix=UE_SUFFIX,
+):
+    """Public entry: build the UE skeleton inside a single undo chunk
+    so a Ctrl+Z reverts the whole operation in one step.
+
+    See :func:`_build_ue_skeleton_impl` for parameter semantics and
+    return shape."""
+    cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_build_skeleton")
+    try:
+        return _build_ue_skeleton_impl(
+            source=source,
+            granularity=granularity,
+            root_name=root_name,
+            group_name=group_name,
+            suffix=suffix,
+        )
+    finally:
+        cmds.undoInfo(closeChunk=True)
+
+
 def rebuild_ue_skeleton(
     source="auto",
     granularity="main",
@@ -927,16 +1046,21 @@ def rebuild_ue_skeleton(
     group_name=UE_GROUP,
     suffix=UE_SUFFIX,
 ):
-    """Delete the existing UE skeleton (if any) and rebuild from scratch.
-    Idempotent wrapper around :func:`build_ue_skeleton`."""
-    delete_ue_skeleton(group_name=group_name)
-    return build_ue_skeleton(
-        source=source,
-        granularity=granularity,
-        root_name=root_name,
-        group_name=group_name,
-        suffix=suffix,
-    )
+    """Delete-then-build in a single undo chunk, so a Ctrl+Z reverts
+    both stages at once (restoring whatever skeleton existed before
+    Rebuild was called)."""
+    cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_rebuild_skeleton")
+    try:
+        _delete_ue_skeleton_impl(group_name)
+        return _build_ue_skeleton_impl(
+            source=source,
+            granularity=granularity,
+            root_name=root_name,
+            group_name=group_name,
+            suffix=suffix,
+        )
+    finally:
+        cmds.undoInfo(closeChunk=True)
 
 
 # ---------------------------------------------------------------------------
