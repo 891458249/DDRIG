@@ -247,24 +247,41 @@ def _legacy_prefix_scan(module_name):
 
 def _dag_scan_deforms(module_name, limb_grp):
     """Layer 1: every joint under ``limb_grp`` whose short name ends in
-    ``_jDef`` OR non-helper ``_j``, excluding anything under
-    ``*_rigJoints_grp``.  Returns list of full DAG paths."""
+    ``_jDef``, plus the one special-case ``{module_name}_j`` singleton
+    used by the ``base`` module.  Returns list of full DAG paths.
+
+    Rationale for the strict ``_j`` rule: the ``_j`` suffix is heavily
+    overloaded inside DDRIG (spline-IK drivers like
+    ``Spine_spine_splineDriver_N_j``, IK/FK origins, plugs, ribbon
+    internals, ...).  The :data:`_HELPER_TOKENS` blacklist was not
+    exhaustive enough to reliably exclude every such node -- new helper
+    patterns would sneak through as "deform" and contaminate the UE
+    skeleton.  The only ``_j`` joint we positively want is the base
+    module's singleton, which by construction has the exact short name
+    ``{module_name}_j``; every other ``_j`` is a helper and rejected.
+
+    The skin-cluster insurance layer (:func:`_skin_influences_under`)
+    still catches any non-conventional ``_j`` joint that is actually
+    bound to a mesh, so strictness here does not risk dropping real
+    deform joints that have been skinned."""
     if limb_grp is None:
         return _legacy_prefix_scan(module_name)
     all_joints = cmds.listRelatives(
         limb_grp, allDescendents=True, type="joint", fullPath=True
     ) or []
+    singleton_short = module_name + "_j"
     result = []
     for j in all_joints:
         short = _short(j)
         if short.endswith(JDEF_SUFFIX):
             result.append(j)
             continue
-        if short.endswith("_j") and not _is_helper_joint(short):
+        if short == singleton_short:
             ancestors = list(_iter_ancestor_shorts(j))
             if any(a.endswith("_rigJoints_grp") for a in ancestors):
                 continue
             result.append(j)
+        # Any other _j suffix is a helper -- silently rejected.
     return result
 
 
@@ -371,6 +388,13 @@ def parse_def_name(short_name, module_name, prefix_map=None):
         return None
 
     # Step 2: submodule prefix override.
+    #
+    # Strict policy: a prefix entry claims a name only when the
+    # remainder after ``submod_prefix_`` is **pure digits**.  Any other
+    # suffix (e.g. ``splineDriver_0``, ``IK_1``, ``orig_up``) means the
+    # node is a helper inside the sub-submodule, NOT a ribbon member,
+    # and must fall through to Step 3 so it either parses as a generic
+    # segment or is reported as unmapped.
     for entry in prefix_map:
         if entry.get("target_module") != module_name:
             continue
@@ -379,13 +403,12 @@ def parse_def_name(short_name, module_name, prefix_map=None):
             continue
         if core.startswith(pfx + "_"):
             remainder = core[len(pfx) + 1:]
-            target_seg = entry.get("target_segment") or ""
             if remainder.isdigit():
-                return (target_seg, int(remainder))
-            parts = remainder.split("_")
-            if parts and parts[-1].isdigit():
-                return (target_seg, int(parts[-1]))
-            return (target_seg, None)
+                return (entry.get("target_segment") or "", int(remainder))
+            # Non-pure-digit remainder -> let another prefix or Step 3
+            # handle it.  Continue scanning in case a longer prefix
+            # entry also matches.
+            continue
         if core == pfx:
             return (entry.get("target_segment") or "", None)
 
@@ -575,17 +598,37 @@ def _mirror_animation(def_fullpath, jue_short):
     return True
 
 
-def _find_owning_module(guide_short_name, scene_roots):
-    """Return the module_name whose limbGrp contains the DAG ancestor
-    named after it, by scanning ``guide_short_name``'s long path for a
-    segment matching any ``scene_roots`` entry's ``module_name``."""
-    full = cmds.ls(guide_short_name, long=True) or []
-    if not full:
+def _find_owning_module_by_guide(guide_name, scene_roots):
+    """Walk up the DAG from a guide joint until we hit any module's
+    ``root_joint``; return that module's ``module_name``.
+
+    Guide joints all live under ``ddrig_refGuides`` -- a DAG branch
+    entirely separate from each module's limbGrp -- so the old
+    "scan fullpath for a limbGrp-named segment" trick never matched.
+    The correct signal is the guide's **own** parent chain: modules
+    are wired together at the guide level (e.g. ``L_arm_collar_jInit``
+    parented under ``spine_3_jInit``), so walking up from any guide
+    until we meet another module's registered root_joint tells us the
+    owning parent module.
+
+    Returns ``None`` when no ancestor guide is a scene root (e.g. the
+    top-level ``base`` module whose root has no joint parent).
+    """
+    roots_by_short = {r["root_joint"]: r["module_name"] for r in scene_roots}
+    full_list = cmds.ls(guide_name, long=True) or []
+    if not full_list:
         return None
-    names = {r["module_name"] for r in scene_roots}
-    for part in full[0].strip("|").split("|"):
-        if part in names:
-            return part
+    current = full_list[0]
+    visited = set()
+    while current and current not in visited:
+        visited.add(current)
+        short = current.rsplit("|", 1)[-1]
+        if short in roots_by_short:
+            return roots_by_short[short]
+        parents = cmds.listRelatives(current, parent=True, fullPath=True) or []
+        if not parents:
+            return None
+        current = parents[0]
     return None
 
 
@@ -857,14 +900,18 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
         guide_root = info["root_joint"]
         try:
             guide_parent = cmds.listRelatives(
-                guide_root, parent=True, type="joint", fullPath=False
+                guide_root, parent=True, type="joint", fullPath=True
             ) or []
         except RuntimeError:
             guide_parent = []
 
         attach_target = ue_root_short
         if guide_parent:
-            parent_mn = _find_owning_module(guide_parent[0], scene_roots)
+            # Walk up the guide parent chain until we hit another
+            # module's root_joint -- that module owns our attach point.
+            parent_mn = _find_owning_module_by_guide(
+                guide_parent[0], scene_roots
+            )
             if parent_mn and parent_mn in per_module and parent_mn != mn:
                 parent_data = per_module[parent_mn]
                 pick = _pick_cross_module_attach(
@@ -888,6 +935,8 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
                     "UE skeleton build: cross-module parent %s under %s "
                     "failed: %s" % (jue_root, attach_target, exc)
                 )
+        log.info("UE skeleton build: %s attached under %s" %
+                 (mn, attach_target))
 
     if all_warnings:
         log.info("UE skeleton build: %d warning(s)" % len(all_warnings))
