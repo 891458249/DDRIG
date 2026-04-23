@@ -54,9 +54,9 @@ class UESkeletonDialog(QtWidgets.QDialog):
         # ---- Module status table ---------------------------------------
         status_box = QtWidgets.QGroupBox("Module status (current scene)")
         status_lay = QtWidgets.QVBoxLayout(status_box)
-        self.status_table = QtWidgets.QTableWidget(0, 5)
+        self.status_table = QtWidgets.QTableWidget(0, 6)
         self.status_table.setHorizontalHeaderLabels([
-            "Name", "Type", "Side", "Guide", "Build status",
+            "Name", "Type", "Side", "Guide", "Build status", "Detected deform",
         ])
         self.status_table.verticalHeader().setVisible(False)
         self.status_table.setSelectionBehavior(
@@ -72,8 +72,15 @@ class UESkeletonDialog(QtWidgets.QDialog):
         status_lay.addWidget(self.status_table)
 
         status_btn_lay = QtWidgets.QHBoxLayout()
+        self.dump_report_btn = QtWidgets.QPushButton("Dump Detection Report")
+        self.dump_report_btn.setToolTip(
+            "Log the scene-wide deform-joint detection result per module "
+            "without building anything.  Useful for verifying that every "
+            "module is correctly recognised as built before running Build."
+        )
         self.refresh_status_btn = QtWidgets.QPushButton("Refresh Status")
         status_btn_lay.addStretch(1)
+        status_btn_lay.addWidget(self.dump_report_btn)
         status_btn_lay.addWidget(self.refresh_status_btn)
         status_lay.addLayout(status_btn_lay)
         layout.addWidget(status_box)
@@ -204,6 +211,7 @@ class UESkeletonDialog(QtWidgets.QDialog):
 
         # ---- Signals ---------------------------------------------------
         self.refresh_status_btn.clicked.connect(self._refresh_status_table)
+        self.dump_report_btn.clicked.connect(self.on_dump_detection_report)
         self.source_guide_rb.toggled.connect(self._sync_granularity_enablement)
         self.source_rig_rb.toggled.connect(self._sync_granularity_enablement)
         self.source_auto_rb.toggled.connect(self._sync_granularity_enablement)
@@ -264,9 +272,11 @@ class UESkeletonDialog(QtWidgets.QDialog):
             self._set_cell(row, 2, info["side"])
             self._set_cell(row, 3, "%d guides" % info["guide_count"])
             if info["has_rig"]:
-                self._set_cell(row, 4, "%d jDef" % info["jdef_count"])
+                self._set_cell(row, 4, "BUILT")
+                self._set_cell(row, 5, "%d deform" % info["deform_count"])
             else:
                 self._set_cell(row, 4, "-- not built --")
+                self._set_cell(row, 5, "-")
         self.status_table.resizeColumnsToContents()
 
     def _set_cell(self, row, col, text):
@@ -420,3 +430,36 @@ class UESkeletonDialog(QtWidgets.QDialog):
 
     def on_transfer_live(self):
         self._run_transfer(dry_run=False)
+
+    # ---- Slots: detection report (non-destructive diagnostic) ---------
+
+    def on_dump_detection_report(self):
+        """Log what the detection layer sees right now, without
+        building.  Lets the user verify every module is recognised as
+        built -- if a module shows NOT BUILT here but the user thinks
+        it IS built, they know to Test Build it again (or that
+        def_jointsSet is missing for some reason)."""
+        try:
+            report = builder.detection_report()
+        except Exception:   # noqa: BLE001
+            self._log_exception("Detection report failed:")
+            return
+        self._log("=== Detection Report ===")
+        if not report:
+            self._log("  (no guide roots in scene)")
+            return
+        for entry in report:
+            mn = entry["module_name"]
+            if entry["has_rig"]:
+                deforms = entry["deforms"]
+                self._log(
+                    "  %-28s BUILT     %2d guides  %2d deform  examples: %s" %
+                    (mn, entry["guide_count"], len(deforms),
+                     ", ".join(deforms[:3]) + (", ..." if len(deforms) > 3 else ""))
+                )
+            else:
+                self._log(
+                    "  %-28s NOT BUILT %2d guides   (no deform joints found under "
+                    "def_jointsSet_* for prefix %r)" %
+                    (mn, entry["guide_count"], mn + "_")
+                )

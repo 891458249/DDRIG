@@ -23,6 +23,9 @@ from ddrig.tools.ue_skeleton.builder import (
     delete_ue_skeleton,
     rebuild_ue_skeleton,
     module_status_snapshot,
+    module_has_rig,
+    collect_module_deform_joints,
+    detection_report,
 )
 from ddrig.tools.ue_skeleton.skin_swap import transfer_skin_to_ue
 
@@ -36,5 +39,8 @@ __all__ = [
     "delete_ue_skeleton",
     "rebuild_ue_skeleton",
     "module_status_snapshot",
+    "module_has_rig",
+    "collect_module_deform_joints",
+    "detection_report",
     "transfer_skin_to_ue",
 ]
