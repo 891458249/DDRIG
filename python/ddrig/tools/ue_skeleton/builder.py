@@ -334,7 +334,8 @@ def module_has_rig(module_name):
     return len(collect_module_deform_joints(module_name)) > 0
 
 
-def find_deform_for_guide(guide_name, module_name, module_deforms=None):
+def find_deform_for_guide(guide_name, module_name, module_deforms=None,
+                          exclude=None):
     """Given a guide joint short name like ``L_arm_collar_jInit``,
     return its deform counterpart (short name) if one exists, else
     ``None``.
@@ -349,11 +350,24 @@ def find_deform_for_guide(guide_name, module_name, module_deforms=None):
        candidate short-circuit this branch.
     3. Base-style special: if the guide stem ends with ``_root``,
        try ``{module_name}_j`` (base module's naming).
+    4. Spatial nearest within the module-local deform pool (no
+       distance threshold).  The DAG-ancestry filter in
+       :func:`collect_module_deform_joints` is the implicit guardrail
+       -- candidates are bounded to this module's limbGrp subtree, so
+       taking the world-space nearest neighbour cannot accidentally
+       cross modules.  Needed for spline-IK modules whose deforms
+       (``Spine_spine_0_jDef``, ``neckSplineIK_head_0_jDef``) don't
+       share the guide's naming stem.
 
-    The candidate is only accepted if the module actually registered
-    it as a deform joint (i.e. it appears in ``module_deforms`` -- the
-    list from ``collect_module_deform_joints``).  That gate prevents
-    leftover helpers or names-that-happen-to-match from sneaking in."""
+    ``exclude`` is an optional iterable of deform short names to veto
+    at every priority -- used by the caller to enforce one-guide-one-deform
+    during a greedy sweep, without which the spatial fallback would
+    happily assign the same nearest deform to every guide.
+
+    The candidate from priorities 1-3 is only accepted if the module
+    actually registered it as a deform joint (i.e. it appears in
+    ``module_deforms``).  That gate prevents leftover helpers or
+    names-that-happen-to-match from sneaking in."""
     guide_short = _short(guide_name)
     if not guide_short.endswith(GUIDE_SUFFIX):
         return None
@@ -361,24 +375,50 @@ def find_deform_for_guide(guide_name, module_name, module_deforms=None):
     if module_deforms is None:
         module_deforms = collect_module_deform_joints(module_name)
     member_set = set(module_deforms)
+    exclude_set = set(exclude) if exclude else set()
 
     # Priority 1: stem_jDef
     cand = stem + JDEF_SUFFIX
-    if cand in member_set:
+    if cand in member_set and cand not in exclude_set:
         return cand
     # Priority 2: stem_j (rejecting helpers is redundant because
     # module_deforms is already filtered, but belt-and-suspenders).
     cand = stem + "_j"
-    if cand in member_set and not _is_helper_joint(cand):
+    if (cand in member_set and cand not in exclude_set
+            and not _is_helper_joint(cand)):
         return cand
     # Priority 3: base-style -- guide stem like "{mod}_root" maps to
     # "{mod}_j" (base module has only one deform joint, named after
     # the module itself with a bare "_j").
     if stem.endswith("_root"):
         base_cand = stem[: -len("_root")] + "_j"
-        if base_cand in member_set and not _is_helper_joint(base_cand):
+        if (base_cand in member_set and base_cand not in exclude_set
+                and not _is_helper_joint(base_cand)):
             return base_cand
-    return None
+
+    # Priority 4: spatial nearest in the module-local deform pool
+    # (NO distance threshold).  Module-local scope is the guardrail.
+    candidates = [d for d in module_deforms if d not in exclude_set]
+    if not candidates:
+        return None
+    try:
+        gp = _world_pos(guide_name)
+    except RuntimeError:
+        return None
+    best = None
+    best_dist = float("inf")
+    for d in candidates:
+        if not cmds.objExists(d):
+            continue
+        try:
+            dp = _world_pos(d)
+        except RuntimeError:
+            continue
+        dist = (gp - dp).length()
+        if dist < best_dist:
+            best = d
+            best_dist = dist
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +528,11 @@ def _partition_deforms(guide_chain, module_name, module_deforms):
     main_of = {}
     claimed = set()
     for g in guide_chain:
-        d = find_deform_for_guide(g, module_name, module_deforms)
+        # Pass exclude=claimed so Priority 4's spatial fallback never
+        # re-picks a deform already assigned to a previous guide.
+        d = find_deform_for_guide(
+            g, module_name, module_deforms, exclude=claimed
+        )
         if d is not None and d not in claimed:
             main_of[g] = d
             claimed.add(d)
@@ -802,11 +846,64 @@ def _per_module_source_decision(module, source):
 def _delete_ue_skeleton_impl(group_name):
     """Unwrapped delete -- does not open its own undo chunk (callers
     that want to group delete + build must open a single chunk
-    themselves)."""
+    themselves).
+
+    Deletes the entire ``group_name`` subtree, explicitly purging any
+    parent/scale constraint nodes that live under each jUE FIRST.
+    Constraints sometimes have incoming connections from external rig
+    nodes (the driving _jDef's rotatePivot etc.) that on rare occasions
+    prevent a clean cascade-delete and leave orphan _jUE behind --
+    which then triggers "name already taken" warnings on the next
+    Build.  Purging constraints first removes that risk."""
+    if not cmds.objExists(group_name):
+        return False
+
+    # 1. Gather every descendant (joints, constraints, transforms) upfront.
+    all_descendants = cmds.listRelatives(
+        group_name, allDescendents=True, fullPath=True
+    ) or []
+
+    # 2. Delete constraints first.  Two passes: (a) any constraint
+    #    node found directly in the descendant list, (b) child
+    #    constraints of any descendant transform (Maya sometimes
+    #    returns constraints as children rather than siblings).
+    constraints_to_delete = []
+    for node in all_descendants:
+        if not cmds.objExists(node):
+            continue
+        try:
+            if cmds.objectType(node, isAType="constraint"):
+                constraints_to_delete.append(node)
+        except RuntimeError:
+            pass
+        try:
+            kids = cmds.listRelatives(
+                node, children=True, type="constraint", fullPath=True
+            ) or []
+        except RuntimeError:
+            kids = []
+        constraints_to_delete.extend(kids)
+    # Dedup preserving order.
+    constraints_to_delete = list(dict.fromkeys(constraints_to_delete))
+    for c in constraints_to_delete:
+        if cmds.objExists(c):
+            try:
+                cmds.delete(c)
+            except RuntimeError as exc:
+                log.warning(
+                    "UE skeleton delete: constraint %s failed: %s" % (c, exc)
+                )
+
+    # 3. Cascade-delete the group itself.
     if cmds.objExists(group_name):
-        cmds.delete(group_name)
-        return True
-    return False
+        try:
+            cmds.delete(group_name)
+        except RuntimeError as exc:
+            log.warning(
+                "UE skeleton delete: group %s failed: %s" % (group_name, exc)
+            )
+            return False
+    return True
 
 
 def delete_ue_skeleton(group_name=UE_GROUP):
@@ -869,10 +966,57 @@ def _build_ue_skeleton_impl(
             "granularity must be one of %s, got %r" %
             (_VALID_GRANULARITIES, granularity)
         )
+    # ---- Conflict pre-check ------------------------------------------------
+    # A previous partial or interrupted Build may have left ue_skeleton_grp
+    # and/or stray *_jUE joints in the scene.  Reusing their names later
+    # would trigger Maya's "name already taken" auto-numbering and break
+    # the constraint wiring.  Auto-clear the named group first; then
+    # sweep orphan _jUE joints that have no meaningful connections.
+    # Orphans with active connections (user wired them into their rig on
+    # purpose) are left in place with a warning.
     if cmds.objExists(group_name):
-        raise RuntimeError(
-            "%r already exists. Use rebuild_ue_skeleton() or "
-            "delete_ue_skeleton() first." % group_name
+        log.warning(
+            "UE skeleton build: pre-clearing existing %r "
+            "(leftover from previous run)" % group_name
+        )
+        _delete_ue_skeleton_impl(group_name)
+
+    orphans_cleaned = 0
+    orphans_kept = 0
+    for j in cmds.ls("*" + suffix, type="joint", long=True) or []:
+        parents = cmds.listRelatives(j, parent=True, fullPath=True) or []
+        parent_short = _short(parents[0]) if parents else None
+        # Belongs to a live group_name subtree?  (We just cleared it, but
+        # defensive in case the user supplied an unusual name.)
+        if parent_short in (group_name, root_name):
+            continue
+        try:
+            conns = cmds.listConnections(
+                j, source=True, destination=True, skipConversionNodes=True
+            ) or []
+            # Filter out the joint's own shape / uninteresting default nodes.
+            conns = [c for c in conns if not c.startswith("default")]
+        except RuntimeError:
+            conns = []
+        if conns:
+            log.warning(
+                "UE skeleton build: orphan %s has %d connection(s); "
+                "left in place" % (_short(j), len(conns))
+            )
+            orphans_kept += 1
+            continue
+        try:
+            cmds.delete(j)
+            orphans_cleaned += 1
+        except RuntimeError as exc:
+            log.warning(
+                "UE skeleton build: cleaning orphan %s failed: %s" %
+                (_short(j), exc)
+            )
+    if orphans_cleaned or orphans_kept:
+        log.info(
+            "UE skeleton build: orphan sweep -- %d cleaned, %d kept" %
+            (orphans_cleaned, orphans_kept)
         )
 
     modules = _collect_modules()

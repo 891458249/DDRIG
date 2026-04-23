@@ -435,12 +435,16 @@ class UESkeletonDialog(QtWidgets.QDialog):
 
     def on_dump_detection_report(self):
         """Log what the detection layer sees right now, without
-        building.  For each module lists its deform joints and the
-        immediate parent transform each lives under, so the user can
-        verify the DAG-ancestor scan attributed them correctly
-        (especially for modules whose deforms nest under
-        scale_grp / nonScale_grp / sub-module grps)."""
+        building.  For each BUILT module also simulates a greedy
+        guide -> deform pairing (mirroring the real build's
+        ``_partition_deforms`` sweep) and prints the world-space
+        distance of each pairing, so the user can visually verify
+        that Priority 4's spatial fallback picks reasonable matches
+        before committing to Build."""
         from maya import cmds
+        import maya.api.OpenMaya as om
+        from ddrig.base import initials
+
         try:
             report = builder.detection_report()
         except Exception:   # noqa: BLE001
@@ -450,6 +454,14 @@ class UESkeletonDialog(QtWidgets.QDialog):
         if not report:
             self._log("  (no guide roots in scene)")
             return
+
+        # Map module_name -> guide_root (for the matching preview).
+        try:
+            scene_roots = initials.Initials().get_scene_roots()
+        except Exception:   # noqa: BLE001
+            scene_roots = []
+        roots_by_module = {r["module_name"]: r["root_joint"] for r in scene_roots}
+
         for entry in report:
             mn = entry["module_name"]
             if not entry["has_rig"]:
@@ -477,3 +489,37 @@ class UESkeletonDialog(QtWidgets.QDialog):
                 self._log("    - %s  (under %s)" % (d, parent))
             if len(deforms) > 15:
                 self._log("    ... (%d more)" % (len(deforms) - 15))
+
+            # ---- Matching preview (mirrors _partition_deforms) --------
+            guide_root = roots_by_module.get(mn)
+            if not guide_root or not cmds.objExists(guide_root):
+                continue
+            descendants = cmds.listRelatives(
+                guide_root, allDescendents=True, type="joint"
+            ) or []
+            # listRelatives(ad=True) returns deep-to-shallow; reverse it
+            # and prepend root for a natural parent-first traversal.
+            guide_chain = [guide_root] + list(reversed(descendants))
+
+            self._log("    Guide matching preview:")
+            used = set()
+            for g in guide_chain:
+                gs = g.rsplit("|", 1)[-1]
+                if not gs.endswith(builder.GUIDE_SUFFIX):
+                    continue
+                match = builder.find_deform_for_guide(
+                    gs, mn, module_deforms=deforms, exclude=used
+                )
+                if match is None:
+                    self._log("      %s -> (no deform available)" % gs)
+                    continue
+                used.add(match)
+                try:
+                    gp = cmds.xform(gs, q=True, ws=True, t=True)
+                    mp = cmds.xform(match, q=True, ws=True, t=True)
+                    dist = (om.MVector(*gp) - om.MVector(*mp)).length()
+                    self._log(
+                        "      %s -> %s  (dist=%.2f)" % (gs, match, dist)
+                    )
+                except RuntimeError:
+                    self._log("      %s -> %s  (dist=?)" % (gs, match))
