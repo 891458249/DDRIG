@@ -1,52 +1,60 @@
-"""Build a parallel UE-compatible skeleton -- guide-first, rig-optional.
+"""Build a parallel UE-compatible skeleton -- rule-driven, def-only.
 
 Overview
 --------
 
-DDRIG's deform joints (`_jDef`) form a flat layout optimised for Maya's
-matrix math.  UE / Unity require a single-root hierarchical skeleton,
-so this tool generates a PARALLEL skeleton of `_jUE` joints with proper
-parent-child topology, driven (where possible) by parent+scale
-constraints from the original `_jDef`.
+DDRIG's deform joints (`_jDef` and the base module's singleton `_j`)
+form a flat layout optimised for Maya's matrix math.  UE / Unity
+require a single-root hierarchical skeleton, so this tool generates a
+PARALLEL skeleton of `_jUE` joints that mirror each deform joint 1:1,
+wired up by parent+scale constraints so they follow the DDRIG rig
+every frame.
 
-Two orthogonal axes shape the output:
+Topology sourcing (no guide chain, no spatial heuristics)
+---------------------------------------------------------
 
-    source       = "guide" | "rig" | "auto"
-    granularity  = "main"  | "full"
+Every `_jDef` short name carries two pieces of information:
 
-source
-    guide  Topology and world positions come from guide joints (`_jInit`)
-           only.  No animation drivers.  Works even if NO module has
-           been built yet.
+    * a segment_key (``collar`` / ``up`` / ``elbow`` / ``socket_root`` /
+      ``spline`` / ...)
+    * an optional trailing integer index
 
-    rig    Each module must have an `_defJoints_grp` populated with
-           `_jDef` joints.  Positions + parent/scale constraints come
-           from the `_jDef`.  Unbuilt modules are skipped (with warning).
+:func:`parse_def_name` extracts ``(segment_key, index)`` from each name,
+honouring a user-extensible submodule prefix map (e.g.
+``Spine_spine_0_jDef`` -> segment ``spline`` index ``0``).
 
-    auto   Per-module adaptive: use rig when available, fall back to
-           guide for unbuilt modules.  Recommended default; never
-           skips a module.
+:data:`_DEFAULT_UE_TOPOLOGY_RULES` declares, for every ``module_type``,
+the ordered list of segments with per-segment mode (``single`` vs
+``index_asc``) and parent reference.  :func:`build_module_topology`
+buckets each module's deforms by segment, sorts ``index_asc`` segments
+by index, then emits ``(child_def, parent_def)`` pairs by walking the
+rule.  The result is a deterministic, reproducible UE hierarchy that
+does not depend on guide joints, world positions, or arbitrary
+thresholds.
 
-granularity
-    main   One `_jUE` per guide joint (e.g. arm = 4: collar / shoulder
-           / elbow / hand).  Works for every source.
+Deform-joint detection (twin-layer insurance)
+---------------------------------------------
 
-    full   In addition to the main joints, insert every twist / ribbon
-           `_jDef` that lies between two consecutive guide joints on
-           the segment axis (e.g. arm = 13: collar / up_0..up_4 /
-           elbow / low_0..low_4 / hand).  Requires rig data; for
-           guide-sourced modules silently degrades to main.
+:func:`collect_module_deform_joints` returns the UNION of:
+
+    1. **DAG ancestry**: every joint under the module's limbGrp whose
+       short name ends in ``_jDef`` (or non-helper ``_j``), excluding
+       anything under a ``*_rigJoints_grp``.
+    2. **Skin insurance**: every joint that is an influence of any
+       ``skinCluster`` and lives under the same limbGrp, regardless of
+       name.  Catches hand-wired bindings with non-standard naming.
 
 Key invariants
 --------------
-* Only the `ue_skeleton_grp` subtree is touched.  Source `_jDef`,
-  `defJoints_grp`, skin clusters and guide joints are never modified.
-* Each `_jUE` carries a `sourceJDef` string attribute pointing to its
-  driving `_jDef` (empty when static).  skin_swap uses this map to
-  transfer weights without guessing names.
-* Repeat-safe: `rebuild_ue_skeleton` is `delete_ue_skeleton + build_ue_skeleton`.
-* Unbuilt modules do NOT break the cross-module chain -- their
-  jUEs are created from guide positions and the chain remains intact.
+* Only the ``ue_skeleton_grp`` subtree is touched.  Source `_jDef`,
+  skin clusters, and guide joints are never modified.
+* Each `_jUE` carries a ``sourceJDef`` string attribute pointing to its
+  driving `_jDef` (never empty in the rule-driven pipeline).
+  :mod:`ddrig.tools.ue_skeleton.skin_swap` uses this map to transfer
+  weights without guessing names.
+* Repeat-safe: :func:`rebuild_ue_skeleton` is delete + build in one
+  undo chunk.  :func:`build_ue_skeleton` auto-clears a stale group
+  before starting.
 """
 from __future__ import annotations
 
@@ -65,38 +73,81 @@ UE_GROUP = "ue_skeleton_grp"
 UE_ROOT = "root_jUE"
 _SOURCE_ATTR = "sourceJDef"
 
-_VALID_SOURCES = ("guide", "rig", "auto")
-_VALID_GRANULARITIES = ("main", "full")
-
-# Placeholder used in the intra-module sequence for "parent is in another
-# module" -- resolved in the cross-module pass after every module's
-# intra-chain is built.
-_CROSS_MODULE_PLACEHOLDER = "@cross_module_parent"
-
 
 # ---------------------------------------------------------------------------
-# IK-helper guide blacklist
+# Topology rules + submodule prefix map
 # ---------------------------------------------------------------------------
-# Some DDRIG modules declare guide joints that are NOT part of the deform
-# chain -- they are IK pivots / control helpers used only by the rig's
-# control system (e.g. leg's BankIN / BankOUT / HeelPV / ToePV drive the
-# foot-roll IK but never participate in skinning).
-#
-# Without filtering these out, build_ue_skeleton duplicates them into the
-# UE skeleton, where they are useless and clutter the hierarchy.
-#
-# Each entry maps a module_type (as returned by joint.identify -> the
-# ``module_type`` field of get_scene_roots) to the set of guide joint
-# TYPE NAMES (as returned by joint.get_joint_type, via the .otherType
-# string attr for non-standard types) that should be excluded from the
-# UE skeleton regardless of source / granularity.
-#
-# Expand this table as new modules reveal IK-only guide roles.
-_HELPER_GUIDE_TYPES_BY_MODULE = {
-    "leg": {"BankIN", "BankOUT", "HeelPV", "ToePV"},
-    # arm / hindleg / spine / head / etc. have no IK-only guide joints
-    # -- every guide in those chains participates in deformation.
+# Rule entry format: (segment_key, mode, parent_ref)
+#   segment_key   token emitted by parse_def_name after stripping
+#                 module prefix + ``_jDef`` / ``_j`` suffix.  ``""``
+#                 matches bare ``{module}_{N}_jDef``.  ``_singleton``
+#                 matches the case where the stripped core is empty
+#                 (e.g. ``base_j`` -> core="" -> "_singleton").
+#   mode          ``"single"``     - one joint in this segment
+#                 ``"index_asc"``  - multiple joints sorted by trailing _N
+#   parent_ref    ``None``                - module root (cross-module attach)
+#                 ``"segment"``           - parents to that single segment's joint
+#                 ``"segment:last"``      - parents to the last joint of an
+#                                            index_asc segment
+_DEFAULT_UE_TOPOLOGY_RULES = {
+    "arm": [
+        ("collar",       "single",    None),
+        ("up",           "index_asc", "collar"),
+        ("elbow",        "single",    "up:last"),
+        ("low",          "index_asc", "elbow"),
+        ("hand",         "single",    "low:last"),
+    ],
+    "leg": [
+        ("legRoot",      "single",    None),
+        ("up",           "index_asc", "legRoot"),
+        ("knee",         "single",    "up:last"),
+        ("low",          "index_asc", "knee"),
+        ("foot",         "single",    "low:last"),
+        ("ball",         "single",    "foot"),
+        ("toe",          "single",    "ball"),
+    ],
+    "hindleg": [
+        ("hindLegRoot",  "single",    None),
+        ("hindHip",      "single",    "hindLegRoot"),
+        ("stifle",       "single",    "hindHip"),
+        ("hock",         "single",    "stifle"),
+        ("phalanges",    "single",    "hock"),
+    ],
+    "spine": [
+        ("socket_root",  "single",    None),
+        ("spline",       "index_asc", "socket_root"),
+        ("socket_chest", "single",    "spline:last"),
+    ],
+    "head": [
+        ("spline",       "index_asc", None),
+        ("head",         "single",    "spline:last"),
+        ("headEnd",      "single",    "head"),
+    ],
+    "base":      [("_singleton", "single",    None)],
+    "connector": [("_singleton", "single",    None)],
+    "eye":       [("_singleton", "single",    None)],
+    "finger":    [("",           "index_asc", None)],
+    "fkik":      [("",           "index_asc", None)],
+    "singleton": [("",           "index_asc", None)],
+    "surface":   [("",           "index_asc", None)],
+    "tail":      [("",           "index_asc", None)],
+    "tentacle":  [("",           "index_asc", None)],
 }
+
+
+# Default submodule-prefix -> (target_module, target_segment_key).
+# Parse step 2 consults this before stripping the module name, letting
+# spline / spline-IK internals (``Spine_spine_0_jDef``,
+# ``neckSplineIK_head_0_jDef``) land in the right segment bucket without
+# each module having to change its naming.  Users can extend this list
+# via the Prefix Mapping dialog -- the UI merges defaults + user entries
+# and passes the combined list down as ``prefix_map``.
+_DEFAULT_SUBMOD_PREFIX_MAP = [
+    {"submod_prefix": "Spine_spine",
+     "target_module": "spine", "target_segment": "spline"},
+    {"submod_prefix": "neckSplineIK_head",
+     "target_module": "head",  "target_segment": "spline"},
+]
 
 
 # ---------------------------------------------------------------------------
@@ -114,54 +165,6 @@ def _world_pos(node):
     return om.MVector(t[0], t[1], t[2])
 
 
-def _find_parent_joint(node):
-    """Walk up the DAG from ``node`` and return the first joint ancestor
-    short name, or ``None`` if no joint ancestor exists."""
-    parent = cmds.listRelatives(node, parent=True, fullPath=True)
-    while parent:
-        p = parent[0]
-        if cmds.nodeType(p) == "joint":
-            return _short(p)
-        parent = cmds.listRelatives(p, parent=True, fullPath=True)
-    return None
-
-
-def _guide_to_jue_name(guide_name, suffix):
-    """`L_arm_collar_jInit` -> `L_arm_collar_jUE`."""
-    guide_name = _short(guide_name)
-    if guide_name.endswith(GUIDE_SUFFIX):
-        return guide_name[:-len(GUIDE_SUFFIX)] + suffix
-    return guide_name + suffix
-
-
-def _jdef_to_jue_name(jdef_name, suffix):
-    """`L_arm_up_0_jDef` -> `L_arm_up_0_jUE`.  For the legacy base-style
-    `_j` suffix we strip that instead; other names just get ``suffix``
-    appended so the caller never sees an empty string."""
-    jdef_name = _short(jdef_name)
-    if jdef_name.endswith(JDEF_SUFFIX):
-        return jdef_name[:-len(JDEF_SUFFIX)] + suffix
-    if jdef_name.endswith("_j"):
-        return jdef_name[:-len("_j")] + suffix
-    return jdef_name + suffix
-
-
-# ---------------------------------------------------------------------------
-# Deform-joint detection (scene-persistent, rig-built authority)
-# ---------------------------------------------------------------------------
-# DDRIG's test_build action (actions/kinematics.py) registers every
-# module.deformerJoints list into an objectSet named
-# ``def_jointsSet_{rig_name}`` (typically "def_jointsSet_ddrig").  That
-# set is the ONLY scene-persistent source of truth for "which joints
-# actually skin the mesh" -- far more reliable than scanning by
-# `_jDef` suffix or by `{module_name}_defJoints_grp` group existence,
-# both of which miss base (singleton `_j`) and anything registered with
-# irregular naming (spine's sockets, head's spline outputs, etc.).
-#
-# Below scans all def_jointsSet_* sets in the scene (supports multiple
-# rigs per scene) and merges members into one dedup'd list of short
-# names.  Per-module slicing is done by prefix match on module_name.
-
 _HELPER_TOKENS = (
     "_IK_", "_FK_",
     "_orig_", "_SC_", "_RP_",
@@ -176,22 +179,11 @@ def _is_helper_joint(short_name):
     auxiliary (IK / FK / plug / end-leaf) rather than a real deform
     joint.
 
-    Decision rule:
-        * Names ending in ``_jDef`` are NEVER helpers -- the ``_jDef``
-          suffix is DDRIG's explicit marker for deform joints.  A
-          token like ``_headEnd_`` in a jDef name (as in
-          ``C_head_headEnd_jDef``) is still a deform -- head's end
-          joint genuinely participates in the skin.
-        * Names ending in ``_j`` are suspect because the ``_j`` suffix
-          is heavily overloaded in DDRIG: base's singleton deform uses
-          it, as do arm's IK/FK helpers and every module's ``_plug_j``.
-          For these we apply the token blacklist.
-        * Anything else (e.g. a custom module using a different suffix)
-          falls through as non-helper.
-
-    The name is padded with underscores on both ends so each blacklist
-    token matches as a full path segment rather than a stray
-    substring."""
+        * Names ending in ``_jDef`` are NEVER helpers.
+        * Names ending in ``_j`` are checked against the token
+          blacklist -- the ``_j`` suffix is overloaded across IK/FK
+          helpers, plugs, and the base module's singleton deform.
+        * Other suffixes fall through as non-helper."""
     if short_name.endswith(JDEF_SUFFIX):
         return False
     if not short_name.endswith("_j"):
@@ -200,18 +192,20 @@ def _is_helper_joint(short_name):
     return any(tok in padded for tok in _HELPER_TOKENS)
 
 
+# ---------------------------------------------------------------------------
+# limbGrp anchoring + DAG ancestry helpers
+# ---------------------------------------------------------------------------
+
 def _find_limb_grp(module_name):
     """Return the full DAG path of the module's limbGrp transform.
 
-    Per ``core/module.py:65``, every module creates a top-level
-    transform named exactly ``module_name`` (via
-    ``naming.parse([self.module_name])`` with no side, which collapses
-    to the module_name verbatim under any naming rule) to house all
-    its rig groups -- scale_grp, nonScale_grp, defJoints_grp,
-    rigJoints_grp, and nested sub-module grps from spline modules.
+    Per ``core/module.py``, every module creates a top-level transform
+    named exactly ``module_name`` to house all its rig groups
+    (scale_grp, nonScale_grp, defJoints_grp, rigJoints_grp, nested
+    sub-module grps for spline modules).
 
-    Returns None if no matching transform exists (module not built, or
-    limbGrp was renamed by the user)."""
+    Returns None when no matching transform exists (module not built,
+    or user renamed the limbGrp)."""
     candidates = cmds.ls(module_name, long=True) or []
     for c in candidates:
         try:
@@ -224,649 +218,422 @@ def _find_limb_grp(module_name):
 
 def _iter_ancestor_shorts(node_path):
     """Yield the short names of every ancestor of ``node_path`` (NOT
-    including the node itself).  ``node_path`` must be a full DAG path
-    (starts with ``|``).  Used to veto joints living under certain
-    sub-grps (e.g. ``*_rigJoints_grp``) without resolving every
-    parent via separate Maya calls."""
+    including the node itself).  ``node_path`` must be a full DAG path.
+    Used to veto joints living under ``*_rigJoints_grp`` without
+    resolving every parent via separate Maya calls."""
     parts = node_path.strip("|").split("|")
     for p in parts[:-1]:
         yield p
 
 
 def _legacy_prefix_scan(module_name):
-    """Fallback when the module's limbGrp cannot be located -- mirrors
-    the pre-DAG detection that Commit 4bdcb69 shipped.  Keeps us
-    working if the user renamed the limbGrp manually."""
-    jdef_hits = cmds.ls(module_name + "_*_jDef", type="joint") or []
-    j_raw = cmds.ls(module_name + "_*_j", type="joint") or []
+    """Fallback when the module's limbGrp cannot be located.  Returns a
+    list of full DAG paths."""
+    jdef_hits = cmds.ls(module_name + "_*_jDef", type="joint", long=True) or []
+    j_raw = cmds.ls(module_name + "_*_j", type="joint", long=True) or []
     j_hits = [j for j in j_raw if not _is_helper_joint(_short(j))]
     base_singleton = []
     base_cand = module_name + "_j"
-    if cmds.objExists(base_cand):
-        try:
-            if cmds.objectType(base_cand) == "joint":
-                base_singleton.append(base_cand)
-        except RuntimeError:
-            pass
-    # Dedup while preserving order.
+    hits = cmds.ls(base_cand, type="joint", long=True) or []
+    base_singleton.extend(hits)
     seen = set()
     out = []
     for n in jdef_hits + j_hits + base_singleton:
-        s = _short(n)
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
     return out
 
 
-def _deform_set_members():
-    """Return every joint in any ``def_jointsSet_*`` objectSet, as
-    short names, deduplicated.  Retained for diagnostics: Commit 4bdcb69
-    used this as the authoritative source, but the DAG-ancestor scan
-    in :func:`collect_module_deform_joints` is now primary because it
-    catches deform joints whose names do not carry the module's prefix
-    (spine's ``Spine_spine_0_jDef``, head's ``neckSplineIK_head_0_jDef``)."""
-    sets = cmds.ls("def_jointsSet_*", type="objectSet") or []
-    seen = set()
-    out = []
-    for s in sets:
-        members = cmds.sets(s, query=True) or []
-        for m in members:
-            short = _short(m)
-            if short and short not in seen:
-                seen.add(short)
-                out.append(short)
-    return out
-
-
-def collect_module_deform_joints(module_name):
-    """Return all deform joints attributable to ``module_name`` by DAG
-    ancestry, as short names.  Matches joints whose limbGrp ancestor
-    is the module's top transform, regardless of intermediate grp
-    naming (scale_grp / nonScale_grp / defJoints_grp / nested
-    sub-module grps).
-
-    Filtering:
-        * ``*_jDef`` joints are accepted unconditionally -- DDRIG's
-          explicit deform marker.
-        * ``*_j`` joints are accepted only if they pass
-          :func:`_is_helper_joint` AND are NOT descendants of a
-          ``*_rigJoints_grp`` (which houses rig control internals
-          using the same ``_j`` suffix as base's singleton deform).
-        * Other suffixes are ignored.
-
-    When the limbGrp cannot be located (module not built, or its name
-    was changed), falls back to :func:`_legacy_prefix_scan` -- the
-    pre-DAG prefix string match."""
-    limb_grp = _find_limb_grp(module_name)
+def _dag_scan_deforms(module_name, limb_grp):
+    """Layer 1: every joint under ``limb_grp`` whose short name ends in
+    ``_jDef`` OR non-helper ``_j``, excluding anything under
+    ``*_rigJoints_grp``.  Returns list of full DAG paths."""
     if limb_grp is None:
         return _legacy_prefix_scan(module_name)
-
     all_joints = cmds.listRelatives(
         limb_grp, allDescendents=True, type="joint", fullPath=True
     ) or []
-    seen = set()
-    out = []
+    result = []
     for j in all_joints:
         short = _short(j)
-        if short in seen:
-            continue
         if short.endswith(JDEF_SUFFIX):
-            seen.add(short)
-            out.append(short)
+            result.append(j)
             continue
         if short.endswith("_j") and not _is_helper_joint(short):
-            # Exclude rig-internal joints that happen to use the _j
-            # suffix -- those live under *_rigJoints_grp.  Descending
-            # into a module's own rigJoints_grp would sweep FK/IK
-            # control joints into the deform bucket.
             ancestors = list(_iter_ancestor_shorts(j))
             if any(a.endswith("_rigJoints_grp") for a in ancestors):
                 continue
-            seen.add(short)
-            out.append(short)
-    return out
+            result.append(j)
+    return result
 
 
-def module_has_rig(module_name):
-    """Public: True iff ``module_name``'s limbGrp contains at least
-    one deform joint (i.e. the module has been Test Built)."""
+def _skin_influences_under(limb_grp):
+    """Layer 2: every joint that is a ``skinCluster`` influence AND
+    lives under ``limb_grp`` (long-path ancestry check).  Returns list
+    of full DAG paths.  Catches hand-wired bindings whose names do not
+    follow DDRIG conventions."""
+    if limb_grp is None:
+        return []
+    limb_long = cmds.ls(limb_grp, long=True) or []
+    if not limb_long:
+        return []
+    limb_prefix = limb_long[0]
+
+    result = []
+    seen = set()
+    for sc in cmds.ls(type="skinCluster") or []:
+        try:
+            influences = cmds.skinCluster(sc, query=True, influence=True) or []
+        except RuntimeError:
+            continue
+        for inf in influences:
+            try:
+                inf_long_list = cmds.ls(inf, long=True) or []
+            except RuntimeError:
+                continue
+            if not inf_long_list:
+                continue
+            inf_path = inf_long_list[0]
+            if inf_path in seen:
+                continue
+            if inf_path == limb_prefix or inf_path.startswith(limb_prefix + "|"):
+                seen.add(inf_path)
+                result.append(inf_path)
+    return result
+
+
+def collect_module_deform_joints(module_name):
+    """Return all deform-purpose joints for ``module_name`` as full DAG
+    paths.  Twin-layer detection -- union of DAG ancestry under limbGrp
+    and skinCluster influence-under-limbGrp -- preserves DAG-scan order
+    first, then appends skin-only joints."""
+    limb_grp = _find_limb_grp(module_name)
+
+    dag_hits = _dag_scan_deforms(module_name, limb_grp)
+    dag_set = set(dag_hits)
+
+    skin_hits = _skin_influences_under(limb_grp) if limb_grp else []
+
+    result = list(dag_hits)
+    for j in skin_hits:
+        if j not in dag_set:
+            result.append(j)
+    return result
+
+
+def module_has_rig(module_name, root=None):  # noqa: ARG001 (root accepted for API convenience)
+    """Public: True iff ``module_name`` has any detected deform joint.
+
+    The optional ``root`` argument is accepted so UI callers that hold
+    the guide root path can pass it without us looking it up, but it is
+    not consulted -- detection is purely limbGrp-based."""
     return len(collect_module_deform_joints(module_name)) > 0
 
 
-def find_deform_for_guide(guide_name, module_name, module_deforms=None,
-                          exclude=None):
-    """Given a guide joint short name like ``L_arm_collar_jInit``,
-    return its deform counterpart (short name) if one exists, else
-    ``None``.
+# ---------------------------------------------------------------------------
+# Name parsing + topology construction
+# ---------------------------------------------------------------------------
 
-    Matching strategy, in priority order:
+def parse_def_name(short_name, module_name, prefix_map=None):
+    """Parse a deform joint short name into ``(segment_key, index)``.
 
-    1. ``{stem}_jDef`` -- the common convention for arm / leg /
-       hindleg / head end / eye / ...
-    2. ``{stem}_j`` -- retained for modules like ``base`` that build
-       a single-joint deform with the ``_j`` suffix, or for hindleg's
-       ``phalangesTip`` leaf.  Helper tokens (``_IK_`` etc.) in the
-       candidate short-circuit this branch.
-    3. Base-style special: if the guide stem ends with ``_root``,
-       try ``{module_name}_j`` (base module's naming).
-    4. Spatial nearest within the module-local deform pool (no
-       distance threshold).  The DAG-ancestry filter in
-       :func:`collect_module_deform_joints` is the implicit guardrail
-       -- candidates are bounded to this module's limbGrp subtree, so
-       taking the world-space nearest neighbour cannot accidentally
-       cross modules.  Needed for spline-IK modules whose deforms
-       (``Spine_spine_0_jDef``, ``neckSplineIK_head_0_jDef``) don't
-       share the guide's naming stem.
+    Returns ``None`` when the name does not belong to ``module_name``
+    under any interpretation.  ``index`` is an ``int`` when the name
+    has a trailing ``_N`` component, else ``None``.
 
-    ``exclude`` is an optional iterable of deform short names to veto
-    at every priority -- used by the caller to enforce one-guide-one-deform
-    during a greedy sweep, without which the spatial fallback would
-    happily assign the same nearest deform to every guide.
+    Parsing order:
+        1. Strip ``_jDef`` / ``_j`` suffix.  Names with neither are
+           rejected outright.
+        2. Consult the submodule prefix map first -- entries whose
+           ``submod_prefix + "_"`` is an exact prefix of the stripped
+           core (and whose ``target_module`` matches ``module_name``)
+           override the default prefix strip and yield the declared
+           ``target_segment`` plus any trailing integer in the remainder.
+        3. Strip ``module_name + "_"`` from the core, case-insensitively.
+           If the core IS exactly the module name, return ``_singleton``
+           (e.g. ``base_j`` -> core="base" -> segment="_singleton").
+        4. Split the remainder by ``_``; if the last piece is an
+           integer, treat it as the index and the rest as segment_key.
+           Otherwise the whole remainder is the segment_key and index
+           is ``None``.
 
-    The candidate from priorities 1-3 is only accepted if the module
-    actually registered it as a deform joint (i.e. it appears in
-    ``module_deforms``).  That gate prevents leftover helpers or
-    names-that-happen-to-match from sneaking in."""
-    guide_short = _short(guide_name)
-    if not guide_short.endswith(GUIDE_SUFFIX):
+    See module docstring for worked examples."""
+    if prefix_map is None:
+        prefix_map = _DEFAULT_SUBMOD_PREFIX_MAP
+
+    # Step 1: strip suffix.
+    if short_name.endswith(JDEF_SUFFIX):
+        core = short_name[:-len(JDEF_SUFFIX)]
+    elif short_name.endswith("_j"):
+        core = short_name[:-len("_j")]
+    else:
         return None
-    stem = guide_short[:-len(GUIDE_SUFFIX)]
-    if module_deforms is None:
-        module_deforms = collect_module_deform_joints(module_name)
-    member_set = set(module_deforms)
-    exclude_set = set(exclude) if exclude else set()
 
-    # Priority 1: stem_jDef
-    cand = stem + JDEF_SUFFIX
-    if cand in member_set and cand not in exclude_set:
-        return cand
-    # Priority 2: stem_j (rejecting helpers is redundant because
-    # module_deforms is already filtered, but belt-and-suspenders).
-    cand = stem + "_j"
-    if (cand in member_set and cand not in exclude_set
-            and not _is_helper_joint(cand)):
-        return cand
-    # Priority 3: base-style -- guide stem like "{mod}_root" maps to
-    # "{mod}_j" (base module has only one deform joint, named after
-    # the module itself with a bare "_j").
-    if stem.endswith("_root"):
-        base_cand = stem[: -len("_root")] + "_j"
-        if (base_cand in member_set and base_cand not in exclude_set
-                and not _is_helper_joint(base_cand)):
-            return base_cand
-
-    # Priority 4: spatial nearest in the module-local deform pool
-    # (NO distance threshold).  Module-local scope is the guardrail.
-    candidates = [d for d in module_deforms if d not in exclude_set]
-    if not candidates:
-        return None
-    try:
-        gp = _world_pos(guide_name)
-    except RuntimeError:
-        return None
-    best = None
-    best_dist = float("inf")
-    for d in candidates:
-        if not cmds.objExists(d):
+    # Step 2: submodule prefix override.
+    for entry in prefix_map:
+        if entry.get("target_module") != module_name:
             continue
-        try:
-            dp = _world_pos(d)
-        except RuntimeError:
+        pfx = entry.get("submod_prefix") or ""
+        if not pfx:
             continue
-        dist = (gp - dp).length()
-        if dist < best_dist:
-            best = d
-            best_dist = dist
-    return best
+        if core.startswith(pfx + "_"):
+            remainder = core[len(pfx) + 1:]
+            target_seg = entry.get("target_segment") or ""
+            if remainder.isdigit():
+                return (target_seg, int(remainder))
+            parts = remainder.split("_")
+            if parts and parts[-1].isdigit():
+                return (target_seg, int(parts[-1]))
+            return (target_seg, None)
+        if core == pfx:
+            return (entry.get("target_segment") or "", None)
+
+    # Step 3: strip module_name prefix (case-insensitive).
+    mn_lower = module_name.lower()
+    core_lower = core.lower()
+    if core_lower.startswith(mn_lower + "_"):
+        core = core[len(module_name) + 1:]
+    elif core_lower == mn_lower:
+        return ("_singleton", None)
+    else:
+        # Doesn't belong to this module.
+        return None
+
+    # Step 4: final segment/index split.
+    if not core:
+        return ("_singleton", None)
+    parts = core.split("_")
+    if parts[-1].isdigit():
+        return ("_".join(parts[:-1]), int(parts[-1]))
+    return ("_".join(parts), None)
+
+
+def _resolve_parent_ref(parent_ref, seg_single, seg_last):
+    """Translate a rule's ``parent_ref`` token into a concrete def joint
+    full path.  Returns ``None`` when the reference resolves to the
+    module root (cross-module attachment target, filled in later), or
+    when the referenced segment has no emitted joint yet."""
+    if parent_ref is None:
+        return None
+    if ":" in parent_ref:
+        seg, which = parent_ref.split(":", 1)
+        if which == "last":
+            return seg_last.get(seg)
+        return seg_single.get(seg) or seg_last.get(seg)
+    return seg_single.get(parent_ref) or seg_last.get(parent_ref)
+
+
+def build_module_topology(module_name, module_type, all_defs,
+                          prefix_map=None, rules=None):
+    """Convert a module's deform joints into UE hierarchy pairs.
+
+    Returns ``(chain, warnings)`` where:
+        * ``chain`` is a list of ``(child_def_fullpath, parent_def_fullpath_or_None)``.
+          Pairs with ``parent_def_fullpath == None`` are the module's
+          roots -- cross-module attachment is resolved by the caller.
+        * ``warnings`` is a list of human-readable strings describing
+          unparseable or off-rule deforms; caller should log them but
+          not abort.
+
+    Parsing is done against the supplied ``rules`` (default:
+    :data:`_DEFAULT_UE_TOPOLOGY_RULES[module_type]`) and
+    ``prefix_map`` (default + user merged by the UI layer)."""
+    if rules is None:
+        rules = _DEFAULT_UE_TOPOLOGY_RULES.get(module_type)
+    if not rules:
+        return [], ["No topology rule for module_type %r" % module_type]
+
+    if prefix_map is None:
+        prefix_map = _DEFAULT_SUBMOD_PREFIX_MAP
+
+    # Step 1: bucket by segment_key.
+    segments = {key: [] for (key, _mode, _pref) in rules}
+    warnings = []
+    for d in all_defs:
+        short = _short(d)
+        parsed = parse_def_name(short, module_name, prefix_map)
+        if parsed is None:
+            warnings.append(
+                "Unmapped deform %r (could not parse for module %r)"
+                % (short, module_name)
+            )
+            continue
+        seg, idx = parsed
+        if seg in segments:
+            segments[seg].append((idx, d))
+        else:
+            warnings.append(
+                "Unmapped deform %r -> segment=%r not in rules for %r"
+                % (short, seg, module_type)
+            )
+
+    # Step 2: sort index_asc segments.
+    for (key, mode, _pref) in rules:
+        if mode == "index_asc":
+            segments[key].sort(
+                key=lambda t: (t[0] is None, t[0] if t[0] is not None else 0)
+            )
+
+    # Step 3: emit chain pairs in rule order.
+    chain = []
+    seg_single = {}
+    seg_last = {}
+    for (key, mode, parent_ref) in rules:
+        entries = segments.get(key) or []
+        if not entries:
+            continue
+        if mode == "single":
+            d = entries[0][1]
+            parent = _resolve_parent_ref(parent_ref, seg_single, seg_last)
+            chain.append((d, parent))
+            seg_single[key] = d
+            seg_last[key] = d
+            if len(entries) > 1:
+                warnings.append(
+                    "segment %r in %r had %d candidates in 'single' mode; "
+                    "kept first, discarded the rest" %
+                    (key, module_name, len(entries))
+                )
+        elif mode == "index_asc":
+            parent = _resolve_parent_ref(parent_ref, seg_single, seg_last)
+            for (_idx, d) in entries:
+                chain.append((d, parent))
+                parent = d
+            seg_last[key] = entries[-1][1]
+    return chain, warnings
 
 
 # ---------------------------------------------------------------------------
-# Module / guide topology collection
+# jUE creation primitives + cross-module helpers
 # ---------------------------------------------------------------------------
 
-def _guide_chain_for_module(guide_root, module_root_set):
-    """Preorder-DFS traversal starting at ``guide_root``, stopping at
-    any joint that belongs to ANOTHER module (i.e. another entry in
-    ``module_root_set``).  Returns an ordered list of joint short names.
-
-    Also returns a ``{child: parent}`` dict limited to the in-module
-    pairs, so callers can reconstruct edges for twist insertion.
-    """
-    chain = [guide_root]
-    parent_map = {}
-
-    def _walk(node):
-        children = cmds.listRelatives(
-            node, children=True, type="joint", fullPath=False
-        ) or []
-        for c in children:
-            if c in module_root_set and c != guide_root:
-                # Another module's root -- stop.  That child is the
-                # concern of its own module entry.
-                continue
-            chain.append(c)
-            parent_map[c] = node
-            _walk(c)
-
-    _walk(guide_root)
-    return chain, parent_map
+def _def_to_jue_name(def_fullpath, suffix):
+    """Translate a deform joint full path into the desired jUE short
+    name.  ``{name}_jDef`` -> ``{name}{suffix}``; ``{name}_j`` ->
+    ``{name}{suffix}``; anything else gets ``suffix`` appended."""
+    short = _short(def_fullpath)
+    if short.endswith(JDEF_SUFFIX):
+        return short[:-len(JDEF_SUFFIX)] + suffix
+    if short.endswith("_j"):
+        return short[:-len("_j")] + suffix
+    return short + suffix
 
 
-def _collect_modules():
-    """Return per-module info required by the build pipeline.
+def _create_jue_from_def(def_fullpath, jue_name):
+    """Create a jUE at ``def_fullpath``'s world transform, tag it with
+    ``sourceJDef`` = def's short name, and return the jUE's short name.
 
-    Each entry::
-
-        {
-            "info":          <get_scene_roots entry verbatim>,
-            "guide_root":    <short name>,
-            "guide_chain":   [root, ...DFS descendants, stopping at other module roots],
-            "guide_parent_map": {child_guide: parent_guide, ...}  (in-module only),
-            "has_rig":       bool,
-            "jdefs":         [all jDef short names under the module's defJointsGrp],
-        }
-    """
-    # Lazy import: Initials cascades through Qt; keep this file standalone-importable.
-    from ddrig.base import initials
-    scene_roots = initials.Initials().get_scene_roots()
-    if not scene_roots:
-        raise RuntimeError(
-            "No DDRIG guide roots found in the scene.  Create some guides first."
-        )
-
-    module_root_set = {r["root_joint"] for r in scene_roots}
-
-    modules = []
-    for info in scene_roots:
-        guide_root = info["root_joint"]
-        module_name = info["module_name"]
-        chain, parent_map = _guide_chain_for_module(guide_root, module_root_set)
-        # DAG-ancestor scan through the module's limbGrp: catches every
-        # deform joint parented anywhere inside (scale_grp / nonScale_grp
-        # / defJoints_grp / nested spline-IK sub-module grps).
-        module_deforms = collect_module_deform_joints(module_name)
-        modules.append({
-            "info": info,
-            "guide_root": guide_root,
-            "guide_chain": chain,
-            "guide_parent_map": parent_map,
-            "has_rig": bool(module_deforms),
-            "deforms": module_deforms,
-            # Legacy alias -- some older callers read 'jdefs'.
-            "jdefs": module_deforms,
-        })
-    return modules
-
-
-def _find_module_of_guide(guide_short, modules):
-    """Return the ``module_name`` whose guide_chain contains
-    ``guide_short``, or ``None``."""
-    for m in modules:
-        if guide_short in m["guide_chain"]:
-            return m["info"]["module_name"]
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Twist jDef placement
-# ---------------------------------------------------------------------------
-
-def _partition_deforms(guide_chain, module_name, module_deforms):
-    """Split a module's registered deform joints into:
-
-        * ``main_of`` : ``{guide_short: deform_short}`` -- guides whose
-                        deform counterpart is resolved by
-                        ``find_deform_for_guide`` (stem_jDef / stem_j /
-                        base-style).
-        * ``twist``   : remaining deform joints, in the order they appear
-                        in ``module_deforms``, that did NOT claim any
-                        guide.  These are ribbon / spline / phalanges-tip
-                        joints that get inserted between main joints in
-                        Full granularity.
-    """
-    main_of = {}
-    claimed = set()
-    for g in guide_chain:
-        # Pass exclude=claimed so Priority 4's spatial fallback never
-        # re-picks a deform already assigned to a previous guide.
-        d = find_deform_for_guide(
-            g, module_name, module_deforms, exclude=claimed
-        )
-        if d is not None and d not in claimed:
-            main_of[g] = d
-            claimed.add(d)
-    twist = [d for d in module_deforms if d not in claimed]
-    return main_of, twist
-
-
-def _twist_deforms_between(guide_a, guide_b, twist_deforms):
-    """Return twist deform joints whose world position projects into
-    the open interval (0, 1) of the parameter t along segment a->b.
-
-    Ordering: by t ascending.  Projection is the scalar
-    ``t = ((p - a) . (b - a)) / |b - a|^2``.
-    """
-    pa = _world_pos(guide_a)
-    pb = _world_pos(guide_b)
-    axis = pb - pa
-    len_sq = axis * axis
-    if len_sq < 1e-12:
-        return []
-    picks = []
-    for jd in twist_deforms:
-        pj = _world_pos(jd)
-        t = ((pj - pa) * axis) / len_sq
-        if 0.0 < t < 1.0:
-            picks.append((t, jd))
-    picks.sort(key=lambda x: x[0])
-    return [jd for _, jd in picks]
-
-
-# ---------------------------------------------------------------------------
-# jUE creation primitives
-# ---------------------------------------------------------------------------
-
-def _create_static_jue(from_node, jue_name, parent_jue=None):
-    """Create a jUE that copies ``from_node``'s world transform verbatim.
-
-    Used when the source is a guide joint (no driver available) or any
-    other static reference.  Returns the short name actually created
-    (may be uniquified by Maya)."""
+    The jUE is created in world space -- the caller re-parents it once
+    all intra-module jUEs exist."""
     cmds.select(clear=True)
-    # duplicate gives us joint orient + radius for free and drops any
-    # inbound connections from matrixConstraints etc.
-    dup = cmds.duplicate(from_node, parentOnly=True, name=jue_name)[0]
+    dup = cmds.duplicate(def_fullpath, name=jue_name, parentOnly=True)[0]
     dup_short = _short(dup)
+    # Move to world if duplicate landed under def's parent.
     try:
-        cmds.parent(dup_short, world=True)
+        if cmds.listRelatives(dup_short, parent=True, fullPath=True):
+            cmds.parent(dup_short, world=True)
     except RuntimeError:
         pass
-    # Overwrite transform to match from_node exactly, just in case the
-    # duplicate inherited some transform we did not want.
-    matrix = cmds.xform(from_node, query=True, worldSpace=True, matrix=True)
-    cmds.xform(dup_short, worldSpace=True, matrix=matrix)
+    # Reassert transform (guards against any drift from duplicate).
+    try:
+        matrix = cmds.xform(
+            def_fullpath, query=True, worldSpace=True, matrix=True
+        )
+        cmds.xform(dup_short, worldSpace=True, matrix=matrix)
+    except RuntimeError:
+        pass
+    # UE does not grok Maya's segmentScaleCompensate.
     try:
         cmds.setAttr("%s.segmentScaleCompensate" % dup_short, 0)
     except RuntimeError:
         pass
-    # sourceJDef tag: empty string means "static; no driving _jDef".
+    # Tag source.
     if not cmds.attributeQuery(_SOURCE_ATTR, node=dup_short, exists=True):
         cmds.addAttr(dup_short, longName=_SOURCE_ATTR, dataType="string")
-    cmds.setAttr("%s.%s" % (dup_short, _SOURCE_ATTR), "", type="string")
-    if parent_jue and cmds.objExists(parent_jue):
-        try:
-            cmds.parent(dup_short, parent_jue)
-        except RuntimeError as exc:
-            log.warning("UE skeleton: parent %s under %s failed: %s" %
-                        (dup_short, parent_jue, exc))
+    cmds.setAttr(
+        "%s.%s" % (dup_short, _SOURCE_ATTR),
+        _short(def_fullpath),
+        type="string",
+    )
     return dup_short
 
 
-def _create_driven_jue(jdef, jue_name, parent_jue=None):
-    """Create a jUE at ``jdef``'s world transform, tag it with
-    ``sourceJDef = jdef``.  Returns the short name actually created."""
-    cmds.select(clear=True)
-    dup = cmds.duplicate(jdef, parentOnly=True, name=jue_name)[0]
-    dup_short = _short(dup)
+def _mirror_animation(def_fullpath, jue_short):
+    """Attach parent+scale constraints from def -> jUE so the UE joint
+    follows the DDRIG deform joint every frame."""
     try:
-        cmds.parent(dup_short, world=True)
-    except RuntimeError:
-        pass
-    try:
-        cmds.setAttr("%s.segmentScaleCompensate" % dup_short, 0)
-    except RuntimeError:
-        pass
-    if not cmds.attributeQuery(_SOURCE_ATTR, node=dup_short, exists=True):
-        cmds.addAttr(dup_short, longName=_SOURCE_ATTR, dataType="string")
-    cmds.setAttr("%s.%s" % (dup_short, _SOURCE_ATTR), jdef, type="string")
-    if parent_jue and cmds.objExists(parent_jue):
-        try:
-            cmds.parent(dup_short, parent_jue)
-        except RuntimeError as exc:
-            log.warning("UE skeleton: parent %s under %s failed: %s" %
-                        (dup_short, parent_jue, exc))
-    return dup_short
-
-
-def _mirror_animation(jdef, jue):
-    """Attach parent+scale constraints from ``jdef`` -> ``jue`` so the
-    UE joint follows the DDRIG deform joint every frame."""
-    try:
-        cmds.parentConstraint(jdef, jue, maintainOffset=False)
+        cmds.parentConstraint(def_fullpath, jue_short, maintainOffset=False)
     except RuntimeError as exc:
-        log.warning("parentConstraint(%s -> %s) failed: %s" % (jdef, jue, exc))
+        log.warning("parentConstraint(%s -> %s) failed: %s" %
+                    (def_fullpath, jue_short, exc))
         return False
     try:
-        cmds.scaleConstraint(jdef, jue, maintainOffset=False)
+        cmds.scaleConstraint(def_fullpath, jue_short, maintainOffset=False)
     except RuntimeError:
         pass
     return True
 
 
-# ---------------------------------------------------------------------------
-# Module sequence planning
-# ---------------------------------------------------------------------------
+def _find_owning_module(guide_short_name, scene_roots):
+    """Return the module_name whose limbGrp contains the DAG ancestor
+    named after it, by scanning ``guide_short_name``'s long path for a
+    segment matching any ``scene_roots`` entry's ``module_name``."""
+    full = cmds.ls(guide_short_name, long=True) or []
+    if not full:
+        return None
+    names = {r["module_name"] for r in scene_roots}
+    for part in full[0].strip("|").split("|"):
+        if part in names:
+            return part
+    return None
 
-def _filter_deform_guides(guide_chain, guide_parent_map, module_type):
-    """Drop IK-helper guides from ``guide_chain`` per
-    :data:`_HELPER_GUIDE_TYPES_BY_MODULE` and rewire
-    ``guide_parent_map`` so each surviving guide's parent is the
-    nearest surviving ancestor (or None when the original chain root
-    itself was dropped -- impossible in practice, but handled).
 
-    Returns ``(filtered_chain, repaired_parent_map, filtered_out_list)``.
-    A guide is filtered out iff ``joint.get_joint_type(g)`` returns a
-    name present in the module's helper set.  Reading the joint type
-    is a Maya call; failures (e.g. the attribute is missing) fall back
-    to "keep the guide" to avoid accidentally dropping real deform
-    chain members.
-    """
-    helpers = _HELPER_GUIDE_TYPES_BY_MODULE.get(module_type, set())
-    if not helpers:
-        return list(guide_chain), dict(guide_parent_map), []
-
-    # Import lazily -- joint library touches cmds at module scope,
-    # which is fine inside Maya but we keep it defensive.
-    from ddrig.library import joint as joint_lib
-
-    filtered_out = set()
-    for g in guide_chain:
+def _pick_cross_module_attach(child_roots, candidate_jues):
+    """Among ``candidate_jues`` (the parent module's jUE set), pick the
+    one spatially closest to the first child jUE root.  Simple and
+    adequate when the parent module has a single linear chain -- the
+    "correct" attach point is typically the last or closest jUE."""
+    candidate_jues = [j for j in candidate_jues if j and cmds.objExists(j)]
+    if not child_roots or not candidate_jues:
+        return None
+    try:
+        child_pos = _world_pos(child_roots[0])
+    except RuntimeError:
+        return candidate_jues[0]
+    best = None
+    best_dist = float("inf")
+    for jue in candidate_jues:
         try:
-            jt = joint_lib.get_joint_type(g)
-        except Exception:   # noqa: BLE001
-            jt = None
-        if jt in helpers:
-            filtered_out.add(g)
-
-    if not filtered_out:
-        return list(guide_chain), dict(guide_parent_map), []
-
-    keep_chain = [g for g in guide_chain if g not in filtered_out]
-    keep_set = set(keep_chain)
-    repaired = {}
-    for g in keep_chain:
-        p = guide_parent_map.get(g)
-        # Walk up through filtered-out ancestors until we find a surviving
-        # parent or exhaust the chain.
-        while p is not None and p not in keep_set:
-            p = guide_parent_map.get(p)
-        if p is not None:
-            repaired[g] = p
-    return keep_chain, repaired, sorted(filtered_out)
-
-
-def _plan_module_sequence(module, granularity, suffix):
-    """Produce an ordered list of jUE creation records for one module.
-
-    Each record is a dict::
-
-        {
-            "jue_name":  <desired short name>,
-            "pos_src":   <source node whose world transform to duplicate>,
-            "parent_ref": <previous jUE short name> OR _CROSS_MODULE_PLACEHOLDER,
-            "drive":     <deform joint short name>,   # always non-None now
-            "guide_src": <guide short name> OR None,
-        }
-
-    Returns ``(sequence, filtered_helpers, skipped_guides)`` so callers
-    can log both the IK-helper guides filtered out by
-    ``_HELPER_GUIDE_TYPES_BY_MODULE`` and any guide that had no deform
-    counterpart (strict rig-only; no guide fallback).
-
-    The module is expected to be built (``module["has_rig"]`` True)
-    when this is called; callers that want to skip unbuilt modules
-    check that flag up-front in ``build_ue_skeleton``.
-    """
-    module_name = module["info"]["module_name"]
-    module_type = module["info"]["module_type"]
-    module_deforms = module["deforms"]
-
-    guide_chain, guide_parent_map, filtered_helpers = _filter_deform_guides(
-        module["guide_chain"],
-        module["guide_parent_map"],
-        module_type,
-    )
-
-    main_of_guide, twist_deforms = _partition_deforms(
-        guide_chain, module_name, module_deforms
-    )
-
-    sequence = []
-    skipped_guides = []
-    guide_to_jue_in_module = {}  # guide -> jue_name within this module
-    # Track the last-created jUE name so that if the current guide has
-    # no deform, the NEXT guide's parent reference walks past the hole
-    # (i.e. its parent becomes whatever the nearest surviving ancestor
-    # produced).
-    last_jue_for_guide_path = {}   # guide -> jue created for it (None if skipped)
-
-    for g in guide_chain:
-        parent_g = guide_parent_map.get(g)
-
-        # Find the nearest surviving ancestor's jUE (skip over
-        # previously-skipped guides that had no deform).
-        if parent_g is None:
-            incoming_parent_jue = _CROSS_MODULE_PLACEHOLDER
-        else:
-            # Walk up: parent_g might itself have been skipped.
-            p = parent_g
-            while p is not None and last_jue_for_guide_path.get(p) is None:
-                p = guide_parent_map.get(p)
-            if p is None:
-                incoming_parent_jue = _CROSS_MODULE_PLACEHOLDER
-            else:
-                incoming_parent_jue = last_jue_for_guide_path[p]
-
-            # ---- Twist insertion between nearest surviving ancestor and g ---
-            if granularity == "full":
-                # Use the actual surviving parent-guide for segment projection,
-                # NOT parent_g -- gives correct ordering when an intermediate
-                # guide was skipped (e.g. arm's Shoulder with no shoulder_jDef).
-                proj_parent_g = p if p is not None else None
-                if proj_parent_g is not None:
-                    twists = _twist_deforms_between(
-                        proj_parent_g, g, twist_deforms
-                    )
-                    for twist_d in twists:
-                        twist_jue = _jdef_to_jue_name(twist_d, suffix)
-                        sequence.append({
-                            "jue_name": twist_jue,
-                            "pos_src": twist_d,
-                            "parent_ref": incoming_parent_jue,
-                            "drive": twist_d,
-                            "guide_src": None,
-                        })
-                        incoming_parent_jue = twist_jue
-
-        # ---- Main jUE for this guide ------------------------------------
-        deform = main_of_guide.get(g)
-        if deform is None:
-            # Strict rig-only mode: no deform => no jUE for this guide.
-            # (Shoulder in arm is the canonical case -- IK-only guide
-            # with no shoulder_jDef.)
-            skipped_guides.append(g)
-            last_jue_for_guide_path[g] = None
+            pos = _world_pos(jue)
+        except RuntimeError:
             continue
-
-        jue_name = _guide_to_jue_name(g, suffix)
-        sequence.append({
-            "jue_name": jue_name,
-            "pos_src": deform,
-            "parent_ref": incoming_parent_jue,
-            "drive": deform,
-            "guide_src": g,
-        })
-        guide_to_jue_in_module[g] = jue_name
-        last_jue_for_guide_path[g] = jue_name
-
-    return sequence, filtered_helpers, skipped_guides
-
-
-def _per_module_source_decision(module, source):
-    """Return ``(skip: bool, note: str)`` for the module.
-
-    In the guide-first -> rig-only refactor, ``source`` no longer
-    selects a data source -- all three values now require the module
-    to have a built rig (i.e. at least one member in
-    ``def_jointsSet_*``).  The difference between the three is UI
-    intent only:
-
-        source='rig'   -- user explicitly demanded rig; loudly skip unbuilt.
-        source='auto'  -- skip unbuilt, same as rig, but with a gentler log.
-        source='guide' -- kept for backward-compat; same behaviour as auto.
-
-    Modules that ARE built proceed through ``_plan_module_sequence``;
-    modules that are NOT built are skipped with a clear log entry.
-    Guide fallback (generating static jUEs at guide positions) has
-    been removed per user requirement -- it produced wrong topology
-    since guide chains include control helpers that are not part of
-    the deform rig.
-    """
-    has_rig = module["has_rig"]
-    if has_rig:
-        label = {
-            "rig":   "rig-built",
-            "auto":  "rig-built (auto)",
-            "guide": "rig-built",
-        }.get(source, "rig-built")
-        return False, label
-    skip_note = {
-        "rig":   "not built; skipped (source=rig)",
-        "auto":  "not built; skipped",
-        "guide": "not built; skipped",
-    }.get(source, "not built; skipped")
-    return True, skip_note
+        d = (pos - child_pos).length()
+        if d < best_dist:
+            best = jue
+            best_dist = d
+    return best
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Delete
 # ---------------------------------------------------------------------------
 
 def _delete_ue_skeleton_impl(group_name):
-    """Unwrapped delete -- does not open its own undo chunk (callers
-    that want to group delete + build must open a single chunk
-    themselves).
+    """Unwrapped delete -- does not open its own undo chunk.
 
     Deletes the entire ``group_name`` subtree, explicitly purging any
     parent/scale constraint nodes that live under each jUE FIRST.
-    Constraints sometimes have incoming connections from external rig
-    nodes (the driving _jDef's rotatePivot etc.) that on rare occasions
-    prevent a clean cascade-delete and leave orphan _jUE behind --
-    which then triggers "name already taken" warnings on the next
-    Build.  Purging constraints first removes that risk."""
+    Constraints occasionally hold connections from external rig nodes
+    that prevent a clean cascade-delete and leave orphan _jUE behind,
+    which then triggers "name already taken" on the next Build."""
     if not cmds.objExists(group_name):
         return False
 
-    # 1. Gather every descendant (joints, constraints, transforms) upfront.
     all_descendants = cmds.listRelatives(
         group_name, allDescendents=True, fullPath=True
     ) or []
 
-    # 2. Delete constraints first.  Two passes: (a) any constraint
-    #    node found directly in the descendant list, (b) child
-    #    constraints of any descendant transform (Maya sometimes
-    #    returns constraints as children rather than siblings).
     constraints_to_delete = []
     for node in all_descendants:
         if not cmds.objExists(node):
@@ -883,7 +650,6 @@ def _delete_ue_skeleton_impl(group_name):
         except RuntimeError:
             kids = []
         constraints_to_delete.extend(kids)
-    # Dedup preserving order.
     constraints_to_delete = list(dict.fromkeys(constraints_to_delete))
     for c in constraints_to_delete:
         if cmds.objExists(c):
@@ -894,7 +660,6 @@ def _delete_ue_skeleton_impl(group_name):
                     "UE skeleton delete: constraint %s failed: %s" % (c, exc)
                 )
 
-    # 3. Cascade-delete the group itself.
     if cmds.objExists(group_name):
         try:
             cmds.delete(group_name)
@@ -907,12 +672,8 @@ def _delete_ue_skeleton_impl(group_name):
 
 
 def delete_ue_skeleton(group_name=UE_GROUP):
-    """Remove the UE skeleton group and everything beneath it.  Source
-    `_jDef`, guides, and skin clusters are untouched.  Returns True if
-    something was removed.
-
-    Wrapped in a single undo chunk so Ctrl+Z revives the skeleton in
-    one step."""
+    """Remove the UE skeleton group and everything beneath it, inside
+    a single undo chunk."""
     cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_delete_skeleton")
     try:
         return _delete_ue_skeleton_impl(group_name)
@@ -920,60 +681,26 @@ def delete_ue_skeleton(group_name=UE_GROUP):
         cmds.undoInfo(closeChunk=True)
 
 
-def _build_ue_skeleton_impl(
-    source,
-    granularity,
-    root_name,
-    group_name,
-    suffix,
-):
-    """Build a parallel UE-compatible skeleton.
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
 
-    Args:
-        source: ``"guide"`` | ``"rig"`` | ``"auto"`` -- see module docstring.
-        granularity: ``"main"`` | ``"full"`` -- see module docstring.
-        root_name: short name for the single root joint.
-        group_name: short name for the container group.
-        suffix: suffix applied to all jUE joints (default ``_jUE``).
+def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
+    """Core build logic (no undo-chunk wrapping, no kwarg shuffling).
 
-    Returns:
-        dict with keys::
-
-            {
-                "root":           <root_jue>,
-                "group":          <group>,
-                "created":        [<jue short names in creation order>],
-                "skipped":        [(item, reason), ...],
-                "module_chains":  {module_name: [jue_short, ...]},
-                "module_status":  {module_name: "rig-sourced" | "guide-sourced"
-                                                 | "skipped: ..."},
-                "jdef_to_jue":    {jdef_short: jue_short},
-                "source":         <echoed>,
-                "granularity":    <echoed>,
-            }
-
-    Raises:
-        RuntimeError: no guide roots in the scene, or ``group_name``
-            already exists (caller should use ``rebuild_ue_skeleton``).
-        ValueError: invalid source / granularity.
+    Pipeline:
+        1. Pre-build conflict clear + orphan sweep.
+        2. Create root joint + holder group.
+        3. Per module: ``collect_module_deform_joints`` ->
+           ``build_module_topology`` -> create jUE for every pair ->
+           intra-module reparent.
+        4. Cross-module reparent: each module's jUE root attaches to
+           the parent module's spatially nearest jUE (or to the root
+           jUE when the guide root has no joint ancestor in another
+           module).
+        5. Constraint drivers per (def -> jUE).
     """
-    if source not in _VALID_SOURCES:
-        raise ValueError(
-            "source must be one of %s, got %r" % (_VALID_SOURCES, source)
-        )
-    if granularity not in _VALID_GRANULARITIES:
-        raise ValueError(
-            "granularity must be one of %s, got %r" %
-            (_VALID_GRANULARITIES, granularity)
-        )
-    # ---- Conflict pre-check ------------------------------------------------
-    # A previous partial or interrupted Build may have left ue_skeleton_grp
-    # and/or stray *_jUE joints in the scene.  Reusing their names later
-    # would trigger Maya's "name already taken" auto-numbering and break
-    # the constraint wiring.  Auto-clear the named group first; then
-    # sweep orphan _jUE joints that have no meaningful connections.
-    # Orphans with active connections (user wired them into their rig on
-    # purpose) are left in place with a warning.
+    # -------- 1) Conflict pre-check ----------------------------------------
     if cmds.objExists(group_name):
         log.warning(
             "UE skeleton build: pre-clearing existing %r "
@@ -986,15 +713,12 @@ def _build_ue_skeleton_impl(
     for j in cmds.ls("*" + suffix, type="joint", long=True) or []:
         parents = cmds.listRelatives(j, parent=True, fullPath=True) or []
         parent_short = _short(parents[0]) if parents else None
-        # Belongs to a live group_name subtree?  (We just cleared it, but
-        # defensive in case the user supplied an unusual name.)
         if parent_short in (group_name, root_name):
             continue
         try:
             conns = cmds.listConnections(
                 j, source=True, destination=True, skipConversionNodes=True
             ) or []
-            # Filter out the joint's own shape / uninteresting default nodes.
             conns = [c for c in conns if not c.startswith("default")]
         except RuntimeError:
             conns = []
@@ -1019,9 +743,7 @@ def _build_ue_skeleton_impl(
             (orphans_cleaned, orphans_kept)
         )
 
-    modules = _collect_modules()
-
-    # Holder group + single root joint
+    # -------- 2) Root group + root joint -----------------------------------
     group = cmds.group(empty=True, name=group_name)
     cmds.select(clear=True)
     ue_root = cmds.joint(name=root_name)
@@ -1032,248 +754,259 @@ def _build_ue_skeleton_impl(
     except RuntimeError:
         pass
 
-    module_chains = {}   # module_name -> [jue short names]
-    module_status = {}   # module_name -> status label for log
-    jdef_to_jue = {}     # jdef short -> jue short
-    jue_to_drive = {}    # jue short -> driving jdef (for pass 3 constraints)
-    created = []
-    skipped = []
-
-    # ------- Pass 1: per-module intra-chain ---------------------------------
-    for m in modules:
-        mod_name = m["info"]["module_name"]
-        skip_flag, note = _per_module_source_decision(m, source)
-        module_status[mod_name] = note
-        if skip_flag:
-            module_chains[mod_name] = []
-            skipped.append((mod_name, note))
-            continue
-
-        sequence, filtered_helpers, skipped_guides = _plan_module_sequence(
-            m, granularity, suffix
+    # -------- 3) Per-module intra-chain ------------------------------------
+    from ddrig.base import initials
+    try:
+        scene_roots = initials.Initials().get_scene_roots()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "UE skeleton build: failed to enumerate scene roots: %s" % exc
         )
-        # Enrich module_status with any filtered IK helpers and any
-        # guides that had no deform counterpart (neither _jDef nor _j
-        # matched, and it wasn't the base-style special).  Both counts
-        # are useful for diagnosing why a build is smaller than expected.
-        annotations = []
-        if filtered_helpers:
-            annotations.append(
-                "skipped %d IK helper(s): %s" %
-                (len(filtered_helpers), ", ".join(filtered_helpers))
-            )
-        if skipped_guides:
-            annotations.append(
-                "%d guide(s) with no deform counterpart: %s" %
-                (len(skipped_guides), ", ".join(skipped_guides))
-            )
-        if annotations:
-            module_status[mod_name] = "%s; %s" % (
-                note, "; ".join(annotations)
-            )
-        if not sequence:
-            module_chains[mod_name] = []
+
+    per_module = {}   # module_name -> {"jue_map", "roots", "module_type"}
+    created = []
+    all_warnings = []
+    jdef_to_jue = {}   # def short -> jUE short (legacy consumer: skin_swap)
+
+    for item in scene_roots:
+        mn = item["module_name"]
+        mtype = item["module_type"]
+        all_defs = collect_module_deform_joints(mn)
+        if not all_defs:
+            log.info("UE skeleton build: %s has no deform joints, skipping"
+                     % mn)
             continue
 
-        chain = []
-        # Map jue_name -> (placeholder or resolved parent)
-        # Within a module, parents appear in sequence before their children,
-        # so resolving is straightforward.
-        intra_name_to_real = {}
-        for rec in sequence:
-            parent_ref = rec["parent_ref"]
-            if parent_ref == _CROSS_MODULE_PLACEHOLDER:
-                real_parent = None  # placeholder; resolved in pass 2
-            else:
-                real_parent = intra_name_to_real.get(parent_ref)
-            target_name = rec["jue_name"]
-            if cmds.objExists(target_name):
-                skipped.append(
-                    (target_name, "name already taken in scene; skipping")
+        chain, warnings = build_module_topology(
+            mn, mtype, all_defs, prefix_map=prefix_map
+        )
+        for w in warnings:
+            all_warnings.append("[%s] %s" % (mn, w))
+        if not chain:
+            log.warning(
+                "UE skeleton build: %s produced 0 topology pairs "
+                "(check module_type=%r rules and naming)" % (mn, mtype)
+            )
+            continue
+
+        jue_map = {}
+        module_roots = []
+
+        # 3a) Create every jUE at world-space position.
+        for (child_def, _parent_def) in chain:
+            jue_name = _def_to_jue_name(child_def, suffix)
+            if cmds.objExists(jue_name):
+                log.warning(
+                    "UE skeleton build: skipping %r (name collision)"
+                    % jue_name
                 )
                 continue
-            # Strict rig-only: every planned record carries a driver.
-            # _create_static_jue is kept in the module for hotfix / legacy
-            # reruns but build_ue_skeleton no longer emits static records.
-            jue_short = _create_driven_jue(
-                rec["pos_src"], target_name, parent_jue=real_parent
-            )
-            if rec["drive"]:
-                jue_to_drive[jue_short] = rec["drive"]
-                jdef_to_jue[rec["drive"]] = jue_short
+            try:
+                jue_short = _create_jue_from_def(child_def, jue_name)
+            except RuntimeError as exc:
+                log.warning(
+                    "UE skeleton build: create %r from %s failed: %s"
+                    % (jue_name, child_def, exc)
+                )
+                continue
+            jue_map[child_def] = jue_short
+            jdef_to_jue[_short(child_def)] = jue_short
             created.append(jue_short)
-            chain.append(jue_short)
-            intra_name_to_real[rec["jue_name"]] = jue_short
-            # First jUE of the module is the "head" (parent_ref was the
-            # placeholder).  Remember the placeholder owner too.
-        module_chains[mod_name] = chain
 
-    # ------- Pass 2: cross-module parenting ---------------------------------
-    # For every module whose head jUE was created with the placeholder parent,
-    # find the correct attachment point: the jUE that corresponds to
-    # (guide_root's joint-ancestor).  Fallback: attach to root_jUE.
-    for m in modules:
-        mod_name = m["info"]["module_name"]
-        chain = module_chains.get(mod_name) or []
-        if not chain:
+        # 3b) Intra-module parenting now that every jUE exists.
+        for (child_def, parent_def) in chain:
+            child_jue = jue_map.get(child_def)
+            if not child_jue:
+                continue
+            if parent_def is None:
+                module_roots.append(child_jue)
+                continue
+            parent_jue = jue_map.get(parent_def)
+            if not parent_jue:
+                # Parent def was skipped (name collision / create fail)
+                # -- fall back to treating this jUE as a module root.
+                module_roots.append(child_jue)
+                continue
+            try:
+                cmds.parent(child_jue, parent_jue)
+            except RuntimeError as exc:
+                log.warning(
+                    "UE skeleton build: parent %s under %s failed: %s"
+                    % (child_jue, parent_jue, exc)
+                )
+
+        # 3c) Constraint drivers.
+        for (child_def, _parent_def) in chain:
+            jue = jue_map.get(child_def)
+            if jue:
+                _mirror_animation(child_def, jue)
+
+        per_module[mn] = {
+            "jue_map": jue_map,
+            "roots": module_roots,
+            "module_type": mtype,
+        }
+        log.info("UE skeleton build: %s (%s): %d jUE joints"
+                 % (mn, mtype, len(jue_map)))
+
+    # -------- 4) Cross-module attachment -----------------------------------
+    for mn, data in per_module.items():
+        info = next((r for r in scene_roots if r["module_name"] == mn), None)
+        if not info:
             continue
-        head = chain[0]
-        guide_root = m["guide_root"]
-        parent_guide_short = _find_parent_joint(guide_root)
-        target_parent = None
-        if parent_guide_short is not None:
-            expected_jue = _guide_to_jue_name(parent_guide_short, suffix)
-            if cmds.objExists(expected_jue):
-                target_parent = expected_jue
-        if target_parent is None:
-            # Either top-level module, or the parent module was skipped /
-            # produced no jUE for that guide.  Attach head to root_jUE.
-            target_parent = ue_root_short
-
-        # head's current parent after pass 1 is world (because the
-        # placeholder resolved to None).  Re-parent under target.
+        guide_root = info["root_joint"]
         try:
-            cmds.parent(head, target_parent)
-        except RuntimeError as exc:
-            # Already parented correctly or something blocks the move.
-            log.warning(
-                "UE skeleton: parent %s under %s failed: %s" %
-                (head, target_parent, exc)
-            )
+            guide_parent = cmds.listRelatives(
+                guide_root, parent=True, type="joint", fullPath=False
+            ) or []
+        except RuntimeError:
+            guide_parent = []
 
-    # ------- Pass 3: animation drivers --------------------------------------
-    for jue_short, jdef in jue_to_drive.items():
-        _mirror_animation(jdef, jue_short)
+        attach_target = ue_root_short
+        if guide_parent:
+            parent_mn = _find_owning_module(guide_parent[0], scene_roots)
+            if parent_mn and parent_mn in per_module and parent_mn != mn:
+                parent_data = per_module[parent_mn]
+                pick = _pick_cross_module_attach(
+                    data["roots"], list(parent_data["jue_map"].values())
+                )
+                if pick:
+                    attach_target = pick
+
+        for jue_root in data["roots"]:
+            if not cmds.objExists(jue_root):
+                continue
+            try:
+                current = cmds.listRelatives(
+                    jue_root, parent=True, fullPath=False
+                ) or []
+                if current and current[0] == attach_target:
+                    continue
+                cmds.parent(jue_root, attach_target)
+            except RuntimeError as exc:
+                log.warning(
+                    "UE skeleton build: cross-module parent %s under %s "
+                    "failed: %s" % (jue_root, attach_target, exc)
+                )
+
+    if all_warnings:
+        log.info("UE skeleton build: %d warning(s)" % len(all_warnings))
+        for w in all_warnings:
+            log.warning("  %s" % w)
 
     return {
         "root": ue_root_short,
         "group": group,
         "created": created,
-        "skipped": skipped,
-        "module_chains": module_chains,
-        "module_status": module_status,
+        "per_module": per_module,
         "jdef_to_jue": jdef_to_jue,
-        "source": source,
-        "granularity": granularity,
+        "warnings": all_warnings,
     }
 
 
-def build_ue_skeleton(
-    source="auto",
-    granularity="main",
-    root_name=UE_ROOT,
-    group_name=UE_GROUP,
-    suffix=UE_SUFFIX,
-):
-    """Public entry: build the UE skeleton inside a single undo chunk
-    so a Ctrl+Z reverts the whole operation in one step.
-
-    See :func:`_build_ue_skeleton_impl` for parameter semantics and
-    return shape."""
+def build_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP,
+                      suffix=UE_SUFFIX, prefix_map=None):
+    """Public entry: build the UE skeleton inside a single undo chunk."""
     cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_build_skeleton")
     try:
         return _build_ue_skeleton_impl(
-            source=source,
-            granularity=granularity,
             root_name=root_name,
             group_name=group_name,
             suffix=suffix,
+            prefix_map=prefix_map,
         )
     finally:
         cmds.undoInfo(closeChunk=True)
 
 
-def rebuild_ue_skeleton(
-    source="auto",
-    granularity="main",
-    root_name=UE_ROOT,
-    group_name=UE_GROUP,
-    suffix=UE_SUFFIX,
-):
-    """Delete-then-build in a single undo chunk, so a Ctrl+Z reverts
-    both stages at once (restoring whatever skeleton existed before
-    Rebuild was called)."""
+def rebuild_ue_skeleton(root_name=UE_ROOT, group_name=UE_GROUP,
+                        suffix=UE_SUFFIX, prefix_map=None):
+    """Delete-then-build inside a single undo chunk."""
     cmds.undoInfo(openChunk=True, chunkName="ddrig_ue_rebuild_skeleton")
     try:
         _delete_ue_skeleton_impl(group_name)
         return _build_ue_skeleton_impl(
-            source=source,
-            granularity=granularity,
             root_name=root_name,
             group_name=group_name,
             suffix=suffix,
+            prefix_map=prefix_map,
         )
     finally:
         cmds.undoInfo(closeChunk=True)
 
 
 # ---------------------------------------------------------------------------
-# UI helper: module status snapshot
+# Diagnostics
 # ---------------------------------------------------------------------------
 
 def module_status_snapshot():
-    """Return a list of per-module status dicts for UI previewing.
-
-    Each entry::
-
-        {
-            "module_name":  str,
-            "module_type":  str,
-            "side":         "L" | "R" | "C",
-            "root_joint":   str,
-            "guide_count":  int,
-            "has_rig":      bool,
-            "jdef_count":   int,
-        }
-
-    Safe to call even if there are no guide roots -- returns [].
-    """
+    """Return per-module status dicts for UI previewing.  Safe when no
+    guides exist -- returns []."""
     try:
-        modules = _collect_modules()
-    except RuntimeError:
+        from ddrig.base import initials
+        scene_roots = initials.Initials().get_scene_roots()
+    except Exception:   # noqa: BLE001
         return []
     out = []
-    for m in modules:
-        info = m["info"]
+    for info in scene_roots:
+        mn = info["module_name"]
+        guide_root = info["root_joint"]
+        try:
+            descendants = cmds.listRelatives(
+                guide_root, allDescendents=True, type="joint"
+            ) or []
+        except RuntimeError:
+            descendants = []
+        guide_count = 1 + len(descendants)
+        deforms = collect_module_deform_joints(mn)
         out.append({
-            "module_name": info["module_name"],
-            "module_type": info["module_type"],
-            "side": info["side"],
-            "root_joint": info["root_joint"],
-            "guide_count": len(m["guide_chain"]),
-            "has_rig": m["has_rig"],
-            "deform_count": len(m["deforms"]),
-            # Legacy alias retained so callers coded against the old
-            # field name keep working.
-            "jdef_count": len(m["deforms"]),
+            "module_name": mn,
+            "module_type": info.get("module_type", ""),
+            "side": info.get("side", ""),
+            "root_joint": guide_root,
+            "guide_count": guide_count,
+            "has_rig": len(deforms) > 0,
+            "deform_count": len(deforms),
+            # Legacy alias.
+            "jdef_count": len(deforms),
         })
     return out
 
 
 def detection_report():
-    """Return a list of dicts summarising the detection state of every
-    module in the scene -- used by the UI's "Dump Detection Report"
-    button to expose the raw scan results without kicking off a build.
-
-    Each entry::
+    """Return per-module detection summaries for the UI's Dump
+    Detection Report button.  Each entry::
 
         {
             "module_name":  str,
+            "module_type":  str,
             "has_rig":      bool,
             "guide_count":  int,
-            "deforms":      [short name, ...],      # full list
+            "deforms":      [fullpath, ...],
         }
     """
     try:
-        modules = _collect_modules()
-    except RuntimeError:
+        from ddrig.base import initials
+        scene_roots = initials.Initials().get_scene_roots()
+    except Exception:   # noqa: BLE001
         return []
     out = []
-    for m in modules:
+    for info in scene_roots:
+        mn = info["module_name"]
+        guide_root = info["root_joint"]
+        try:
+            descendants = cmds.listRelatives(
+                guide_root, allDescendents=True, type="joint"
+            ) or []
+        except RuntimeError:
+            descendants = []
+        guide_count = 1 + len(descendants)
+        deforms = collect_module_deform_joints(mn)
         out.append({
-            "module_name": m["info"]["module_name"],
-            "has_rig": m["has_rig"],
-            "guide_count": len(m["guide_chain"]),
-            "deforms": list(m["deforms"]),
+            "module_name": mn,
+            "module_type": info.get("module_type", ""),
+            "has_rig": len(deforms) > 0,
+            "guide_count": guide_count,
+            "deforms": list(deforms),
         })
     return out
