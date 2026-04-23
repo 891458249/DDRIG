@@ -2,12 +2,11 @@
 
 Layout (top to bottom)::
 
-    Module status table (snapshot of the current scene: guide count,
-                         build status per module)            [Refresh]
+    Module status table (snapshot of current scene: guide count, build
+                         status per module)              [Refresh]
 
-    Settings:  Data source   (o)Guide  (o)Rig  (*)Auto
-               Granularity   (*)Main   (o)Include Twist (rig only)
-               Root / Group / Suffix name fields
+    Settings:  Root / Group / Suffix name fields
+                                               [Prefix Mapping...]
 
     Skeleton:  [Build]  [Rebuild]  [Delete]
 
@@ -16,21 +15,154 @@ Layout (top to bottom)::
 
     Log panel + Clear + Close
 
-Source = Guide disables the "Include Twist" radio (twist requires rig).
-Source = Rig pops a confirmation dialog listing unbuilt modules before
-building (otherwise those modules would be skipped silently).
+The Source and Granularity controls are gone: topology is fully
+determined by :data:`ddrig.tools.ue_skeleton.builder._DEFAULT_UE_TOPOLOGY_RULES`
+plus the (default + user) submodule prefix map loaded from
+:mod:`ddrig.tools.ue_skeleton.prefix_config`.
 """
 from __future__ import annotations
 
 import traceback
 
 from ddrig.ui.Qt import QtCore, QtWidgets
-from ddrig.tools.ue_skeleton import builder, skin_swap
+from ddrig.tools.ue_skeleton import builder, prefix_config, skin_swap
 
 
 # objectName begins with "DDRIG " so ddrig.tools.hotswap._close_qt_windows
 # sweeps this dialog up during uninstall / reinstall.
 WINDOW_OBJECT_NAME = "DDRIG UE Skeleton"
+
+
+class PrefixMappingDialog(QtWidgets.QDialog):
+    """Edit user-defined submodule prefix mappings.
+
+    Builtin defaults are shown read-only at the top; user entries are
+    editable in the table below.  Saving writes to
+    :func:`prefix_config.save_user_map`."""
+
+    def __init__(self, parent=None):
+        super(PrefixMappingDialog, self).__init__(parent)
+        self.setWindowTitle("UE Prefix Mapping")
+        self.setMinimumWidth(560)
+        self._build_ui()
+        self._populate()
+
+    def _build_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+
+        layout.addWidget(QtWidgets.QLabel("Builtin mappings (read-only):"))
+        self.builtin_table = QtWidgets.QTableWidget(0, 3)
+        self.builtin_table.setHorizontalHeaderLabels([
+            "Submodule prefix", "Target module", "Target segment",
+        ])
+        self.builtin_table.setEditTriggers(
+            QtWidgets.QAbstractItemView.NoEditTriggers
+        )
+        self.builtin_table.verticalHeader().setVisible(False)
+        self.builtin_table.horizontalHeader().setStretchLastSection(True)
+        self.builtin_table.setMaximumHeight(120)
+        layout.addWidget(self.builtin_table)
+
+        layout.addWidget(QtWidgets.QLabel("User mappings (editable):"))
+        self.user_table = QtWidgets.QTableWidget(0, 3)
+        self.user_table.setHorizontalHeaderLabels([
+            "Submodule prefix", "Target module", "Target segment",
+        ])
+        self.user_table.verticalHeader().setVisible(False)
+        self.user_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.user_table, 1)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.add_btn = QtWidgets.QPushButton("Add row")
+        self.remove_btn = QtWidgets.QPushButton("Remove selected")
+        btn_row.addWidget(self.add_btn)
+        btn_row.addWidget(self.remove_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        path_label = QtWidgets.QLabel(
+            "Saved to: %s" % prefix_config.config_path()
+        )
+        path_label.setStyleSheet("color: gray; font-size: 10px;")
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label)
+
+        dialog_btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
+        )
+        dialog_btns.accepted.connect(self._on_save)
+        dialog_btns.rejected.connect(self.reject)
+        layout.addWidget(dialog_btns)
+
+        self.add_btn.clicked.connect(self._add_row)
+        self.remove_btn.clicked.connect(self._remove_selected)
+
+    def _populate(self):
+        for entry in builder._DEFAULT_SUBMOD_PREFIX_MAP:
+            self._append_row(
+                self.builtin_table,
+                entry["submod_prefix"],
+                entry["target_module"],
+                entry["target_segment"],
+            )
+        for entry in prefix_config.load_user_map():
+            self._append_row(
+                self.user_table,
+                entry["submod_prefix"],
+                entry["target_module"],
+                entry["target_segment"],
+            )
+        self.builtin_table.resizeColumnsToContents()
+
+    def _append_row(self, table, pfx, mod, seg):
+        row = table.rowCount()
+        table.insertRow(row)
+        table.setItem(row, 0, QtWidgets.QTableWidgetItem(pfx))
+        table.setItem(row, 1, QtWidgets.QTableWidgetItem(mod))
+        table.setItem(row, 2, QtWidgets.QTableWidgetItem(seg))
+
+    def _add_row(self):
+        self._append_row(self.user_table, "", "", "")
+        # Put focus on the new row's first cell so the user can type.
+        self.user_table.setCurrentCell(self.user_table.rowCount() - 1, 0)
+        self.user_table.editItem(
+            self.user_table.item(self.user_table.rowCount() - 1, 0)
+        )
+
+    def _remove_selected(self):
+        rows = sorted(
+            {idx.row() for idx in self.user_table.selectedIndexes()},
+            reverse=True,
+        )
+        for r in rows:
+            self.user_table.removeRow(r)
+
+    def _cell_text(self, row, col):
+        item = self.user_table.item(row, col)
+        return item.text().strip() if item else ""
+
+    def _on_save(self):
+        entries = []
+        for r in range(self.user_table.rowCount()):
+            pfx = self._cell_text(r, 0)
+            mod = self._cell_text(r, 1)
+            seg = self._cell_text(r, 2)
+            if pfx and mod and seg:
+                entries.append({
+                    "submod_prefix": pfx,
+                    "target_module": mod,
+                    "target_segment": seg,
+                })
+        try:
+            prefix_config.save_user_map(entries)
+        except OSError as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Save failed",
+                "Could not write %s:\n%s" %
+                (prefix_config.config_path(), exc),
+            )
+            return
+        self.accept()
 
 
 class UESkeletonDialog(QtWidgets.QDialog):
@@ -44,7 +176,6 @@ class UESkeletonDialog(QtWidgets.QDialog):
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.Window)
         self._build_ui()
         self._refresh_status_table()
-        self._sync_granularity_enablement()
 
     # ---- UI construction ------------------------------------------------
 
@@ -74,9 +205,10 @@ class UESkeletonDialog(QtWidgets.QDialog):
         status_btn_lay = QtWidgets.QHBoxLayout()
         self.dump_report_btn = QtWidgets.QPushButton("Dump Detection Report")
         self.dump_report_btn.setToolTip(
-            "Log the scene-wide deform-joint detection result per module "
-            "without building anything.  Useful for verifying that every "
-            "module is correctly recognised as built before running Build."
+            "Log the per-module deform detection result AND the parse "
+            "classification (segment_key + index) of every deform joint, "
+            "without building anything.  ✓ = segment is in the rules "
+            "table; ✗ = segment unknown or name could not be parsed."
         )
         self.refresh_status_btn = QtWidgets.QPushButton("Refresh Status")
         status_btn_lay.addStretch(1)
@@ -89,54 +221,6 @@ class UESkeletonDialog(QtWidgets.QDialog):
         settings_box = QtWidgets.QGroupBox("Settings")
         settings_lay = QtWidgets.QFormLayout(settings_box)
 
-        # Data source (radio group)
-        self.source_group = QtWidgets.QButtonGroup(self)
-        self.source_guide_rb = QtWidgets.QRadioButton("Guide")
-        self.source_guide_rb.setToolTip(
-            "Topology + positions from guide joints (_jInit).\n"
-            "No animation drivers. Works even with no module built."
-        )
-        self.source_rig_rb = QtWidgets.QRadioButton("Rig")
-        self.source_rig_rb.setToolTip(
-            "Requires every module to have _jDef (Test Built).\n"
-            "Unbuilt modules are skipped."
-        )
-        self.source_auto_rb = QtWidgets.QRadioButton("Auto (recommended)")
-        self.source_auto_rb.setToolTip(
-            "Per-module: rig if available, guide fallback otherwise.\n"
-            "Never skips a module."
-        )
-        self.source_auto_rb.setChecked(True)
-        for rb in (self.source_guide_rb, self.source_rig_rb, self.source_auto_rb):
-            self.source_group.addButton(rb)
-        src_lay = QtWidgets.QHBoxLayout()
-        src_lay.addWidget(self.source_guide_rb)
-        src_lay.addWidget(self.source_rig_rb)
-        src_lay.addWidget(self.source_auto_rb)
-        src_lay.addStretch(1)
-        settings_lay.addRow("Data source", src_lay)
-
-        # Granularity (radio group)
-        self.gran_group = QtWidgets.QButtonGroup(self)
-        self.gran_main_rb = QtWidgets.QRadioButton("Main only")
-        self.gran_main_rb.setToolTip(
-            "One _jUE per guide joint (e.g. arm = 4)."
-        )
-        self.gran_main_rb.setChecked(True)
-        self.gran_full_rb = QtWidgets.QRadioButton("Include Twist (rig only)")
-        self.gran_full_rb.setToolTip(
-            "Main joints + every twist/ribbon _jDef between consecutive\n"
-            "guides (e.g. arm = 13). Guide-sourced modules degrade to Main."
-        )
-        self.gran_group.addButton(self.gran_main_rb)
-        self.gran_group.addButton(self.gran_full_rb)
-        gran_lay = QtWidgets.QHBoxLayout()
-        gran_lay.addWidget(self.gran_main_rb)
-        gran_lay.addWidget(self.gran_full_rb)
-        gran_lay.addStretch(1)
-        settings_lay.addRow("Granularity", gran_lay)
-
-        # Name fields
         self.root_name_le = QtWidgets.QLineEdit(builder.UE_ROOT)
         self.group_name_le = QtWidgets.QLineEdit(builder.UE_GROUP)
         self.suffix_le = QtWidgets.QLineEdit(builder.UE_SUFFIX)
@@ -144,6 +228,17 @@ class UESkeletonDialog(QtWidgets.QDialog):
         settings_lay.addRow("Root joint name", self.root_name_le)
         settings_lay.addRow("Skeleton group name", self.group_name_le)
         settings_lay.addRow("jUE suffix", self.suffix_le)
+
+        prefix_row = QtWidgets.QHBoxLayout()
+        self.prefix_btn = QtWidgets.QPushButton("Prefix Mapping...")
+        self.prefix_btn.setToolTip(
+            "Add project-specific submodule prefix -> segment mappings.\n"
+            "Merged with builtin defaults at Build time."
+        )
+        prefix_row.addStretch(1)
+        prefix_row.addWidget(self.prefix_btn)
+        settings_lay.addRow("", prefix_row)
+
         layout.addWidget(settings_box)
 
         # ---- Skeleton actions ------------------------------------------
@@ -164,25 +259,17 @@ class UESkeletonDialog(QtWidgets.QDialog):
             "Remove _jDef from skinClusters after transfer"
         )
         self.remove_jdef_cb.setToolTip(
-            "Off (default): keep both influences; _jDef weights go to zero "
-            "but stay in the cluster.  Safer for round-tripping.\n"
-            "On: strip _jDef from each cluster after the transfer.  Smaller "
-            "FBX but cannot be reversed in-scene."
+            "Off (default): keep both influences; _jDef weights go to "
+            "zero but stay in the cluster.  Safer for round-tripping.\n"
+            "On: strip _jDef from each cluster after the transfer.  "
+            "Smaller FBX but cannot be reversed in-scene."
         )
         skin_lay.addWidget(self.remove_jdef_cb)
 
-        skin_note = QtWidgets.QLabel(
-            "Skin transfer only operates on _jUE joints backed by a _jDef "
-            "driver (source='Rig' or 'Auto' with a built module).\n"
-            "Static _jUEs (from guide-only modules) are skipped with a "
-            "warning."
-        )
-        skin_note.setWordWrap(True)
-        skin_note.setStyleSheet("color: gray; font-size: 11px;")
-        skin_lay.addWidget(skin_note)
-
         skin_btn_lay = QtWidgets.QHBoxLayout()
-        self.dry_run_btn = QtWidgets.QPushButton("Preview Skin Transfer (dry run)")
+        self.dry_run_btn = QtWidgets.QPushButton(
+            "Preview Skin Transfer (dry run)"
+        )
         self.transfer_btn = QtWidgets.QPushButton("Transfer Skin Weights")
         skin_btn_lay.addWidget(self.dry_run_btn)
         skin_btn_lay.addWidget(self.transfer_btn)
@@ -212,9 +299,7 @@ class UESkeletonDialog(QtWidgets.QDialog):
         # ---- Signals ---------------------------------------------------
         self.refresh_status_btn.clicked.connect(self._refresh_status_table)
         self.dump_report_btn.clicked.connect(self.on_dump_detection_report)
-        self.source_guide_rb.toggled.connect(self._sync_granularity_enablement)
-        self.source_rig_rb.toggled.connect(self._sync_granularity_enablement)
-        self.source_auto_rb.toggled.connect(self._sync_granularity_enablement)
+        self.prefix_btn.clicked.connect(self.on_open_prefix_dialog)
         self.build_btn.clicked.connect(self.on_build)
         self.rebuild_btn.clicked.connect(self.on_rebuild)
         self.delete_btn.clicked.connect(self.on_delete)
@@ -222,38 +307,6 @@ class UESkeletonDialog(QtWidgets.QDialog):
         self.transfer_btn.clicked.connect(self.on_transfer_live)
         self.clear_log_btn.clicked.connect(self.log_te.clear)
         self.close_btn.clicked.connect(self.close)
-
-    # ---- Helpers: UI state --------------------------------------------
-
-    def _selected_source(self):
-        if self.source_guide_rb.isChecked():
-            return "guide"
-        if self.source_rig_rb.isChecked():
-            return "rig"
-        return "auto"
-
-    def _selected_granularity(self):
-        return "full" if self.gran_full_rb.isChecked() else "main"
-
-    def _sync_granularity_enablement(self):
-        """Source = Guide disables the 'Include Twist' radio -- twist
-        requires rig data.  When disabled, force selection back to
-        'Main only' so the user's intent is unambiguous."""
-        src = self._selected_source()
-        twist_allowed = src != "guide"
-        self.gran_full_rb.setEnabled(twist_allowed)
-        if not twist_allowed and self.gran_full_rb.isChecked():
-            self.gran_main_rb.setChecked(True)
-        if not twist_allowed:
-            self.gran_full_rb.setToolTip(
-                "Twist joints require rig build (_jDef). "
-                "Switch data source to Rig or Auto to enable."
-            )
-        else:
-            self.gran_full_rb.setToolTip(
-                "Main joints + every twist/ribbon _jDef between consecutive\n"
-                "guides (e.g. arm = 13). Guide-sourced modules degrade to Main."
-            )
 
     # ---- Helpers: module status table ---------------------------------
 
@@ -295,70 +348,38 @@ class UESkeletonDialog(QtWidgets.QDialog):
         self._log("%s\n%s" % (prefix, traceback.format_exc()))
 
     def _current_kwargs(self):
+        """Kwargs for build_ue_skeleton / rebuild_ue_skeleton /
+        delete_ue_skeleton (filtered to each function's signature by
+        the callers)."""
         return {
-            "source": self._selected_source(),
-            "granularity": self._selected_granularity(),
             "root_name": self.root_name_le.text().strip() or builder.UE_ROOT,
             "group_name": self.group_name_le.text().strip() or builder.UE_GROUP,
             "suffix": self.suffix_le.text().strip() or builder.UE_SUFFIX,
+            "prefix_map": prefix_config.get_effective_map(),
         }
 
     def _log_build_result(self, result):
         self._log(
             "Built skeleton: root=%s, group=%s, %d jUE joints created." %
-            (result["root"], result["group"], len(result["created"]))
+            (result["root"], result["group"], len(result.get("created") or []))
         )
-        self._log("  source=%s, granularity=%s" %
-                  (result["source"], result["granularity"]))
-        chains = result.get("module_chains") or {}
-        status = result.get("module_status") or {}
-        if chains:
-            self._log("Module chains:")
-            for mod, chain in chains.items():
-                note = status.get(mod, "")
-                self._log("  %-25s %3d joints   (%s)" %
-                          (mod, len(chain), note))
-        skipped = result.get("skipped") or []
-        if skipped:
-            self._log("Skipped (%d):" % len(skipped))
-            for item, reason in skipped:
-                self._log("  - %s: %s" % (item, reason))
-
-    # ---- Pre-build: Rig-source sanity check ----------------------------
-
-    def _warn_if_rig_source_with_unbuilt(self):
-        """When the user picks source='Rig', preview unbuilt modules and
-        ask for confirmation -- they would otherwise be silently
-        skipped.  Returns True to proceed, False to cancel."""
-        if self._selected_source() != "rig":
-            return True
-        try:
-            snapshot = builder.module_status_snapshot()
-        except Exception:   # noqa: BLE001
-            return True   # let the build itself surface the real error
-        unbuilt = [s["module_name"] for s in snapshot if not s["has_rig"]]
-        if not unbuilt:
-            return True
-        names = "\n".join("  - %s" % m for m in unbuilt)
-        reply = QtWidgets.QMessageBox.warning(
-            self,
-            "Unbuilt modules will be skipped",
-            "Data source is 'Rig' and the following %d module(s) have "
-            "not been Test Built:\n\n%s\n\nThey will be skipped.  Continue?"
-            % (len(unbuilt), names),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel,
-            QtWidgets.QMessageBox.Cancel,
-        )
-        return reply == QtWidgets.QMessageBox.Yes
+        per_module = result.get("per_module") or {}
+        if per_module:
+            self._log("Module output:")
+            for mn, data in per_module.items():
+                self._log("  %-25s %3d joints   (type=%s)" %
+                          (mn, len(data["jue_map"]), data["module_type"]))
+        warnings = result.get("warnings") or []
+        if warnings:
+            self._log("Warnings (%d):" % len(warnings))
+            for w in warnings:
+                self._log("  - %s" % w)
 
     # ---- Slots: skeleton actions ---------------------------------------
 
     def on_build(self):
-        if not self._warn_if_rig_source_with_unbuilt():
-            return
         kw = self._current_kwargs()
-        self._log("=== Build Skeleton (source=%s, granularity=%s) ===" %
-                  (kw["source"], kw["granularity"]))
+        self._log("=== Build Skeleton ===")
         try:
             result = builder.build_ue_skeleton(**kw)
         except (RuntimeError, ValueError) as exc:
@@ -371,12 +392,8 @@ class UESkeletonDialog(QtWidgets.QDialog):
         self._refresh_status_table()
 
     def on_rebuild(self):
-        if not self._warn_if_rig_source_with_unbuilt():
-            return
         kw = self._current_kwargs()
-        self._log("=== Rebuild (delete + build) "
-                  "(source=%s, granularity=%s) ===" %
-                  (kw["source"], kw["granularity"]))
+        self._log("=== Rebuild (delete + build) ===")
         try:
             result = builder.rebuild_ue_skeleton(**kw)
         except (RuntimeError, ValueError) as exc:
@@ -431,20 +448,23 @@ class UESkeletonDialog(QtWidgets.QDialog):
     def on_transfer_live(self):
         self._run_transfer(dry_run=False)
 
+    # ---- Slots: prefix mapping dialog ----------------------------------
+
+    def on_open_prefix_dialog(self):
+        dlg = PrefixMappingDialog(self)
+        dlg.exec_()
+
     # ---- Slots: detection report (non-destructive diagnostic) ---------
 
     def on_dump_detection_report(self):
-        """Log what the detection layer sees right now, without
-        building.  For each BUILT module also simulates a greedy
-        guide -> deform pairing (mirroring the real build's
-        ``_partition_deforms`` sweep) and prints the world-space
-        distance of each pairing, so the user can visually verify
-        that Priority 4's spatial fallback picks reasonable matches
-        before committing to Build."""
+        """Log each module's deform joints together with their
+        parse classification.  ``✓`` = segment is defined in the
+        topology rules for this module_type; ``✗`` = segment unknown
+        (possible naming convention mismatch) or parse outright
+        failed."""
         from maya import cmds
-        import maya.api.OpenMaya as om
-        from ddrig.base import initials
 
+        pmap = prefix_config.get_effective_map()
         try:
             report = builder.detection_report()
         except Exception:   # noqa: BLE001
@@ -455,71 +475,57 @@ class UESkeletonDialog(QtWidgets.QDialog):
             self._log("  (no guide roots in scene)")
             return
 
-        # Map module_name -> guide_root (for the matching preview).
-        try:
-            scene_roots = initials.Initials().get_scene_roots()
-        except Exception:   # noqa: BLE001
-            scene_roots = []
-        roots_by_module = {r["module_name"]: r["root_joint"] for r in scene_roots}
-
         for entry in report:
             mn = entry["module_name"]
-            if not entry["has_rig"]:
+            mtype = entry["module_type"]
+            rules = builder._DEFAULT_UE_TOPOLOGY_RULES.get(mtype)
+            self._log("")
+            self._log("--- %s (type=%s) ---" % (mn, mtype))
+            if not rules:
                 self._log(
-                    "  %s: NOT BUILT  (%d guides; limbGrp %r missing or empty)"
-                    % (mn, entry["guide_count"], mn)
+                    "  WARNING: no topology rule for module_type %r -- "
+                    "this module will be skipped by Build." % mtype
                 )
                 continue
+            valid_segments = {k for (k, _, _) in rules}
+
+            if not entry["has_rig"]:
+                self._log("  NOT BUILT  (%d guides)" % entry["guide_count"])
+                all_nodes = cmds.ls(mn + "*", type="joint") or []
+                if all_nodes:
+                    self._log(
+                        "  Scene has %d joint(s) whose short name starts "
+                        "with %r:" % (len(all_nodes), mn)
+                    )
+                    for n in all_nodes[:15]:
+                        self._log("    ? %s" % n)
+                    if len(all_nodes) > 15:
+                        self._log("    ... +%d more" % (len(all_nodes) - 15))
+                continue
+
             deforms = entry["deforms"]
-            self._log(
-                "  %s: BUILT  (%d guides, %d deform)" %
-                (mn, entry["guide_count"], len(deforms))
-            )
-            # Show up to 15 deform joints with their immediate parent
-            # transform, so the user can spot joints that landed under
-            # an unexpected sub-group.
-            for d in deforms[:15]:
+            self._log("  BUILT: %d deform joints" % len(deforms))
+            for d in deforms:
+                short = d.rsplit("|", 1)[-1]
                 try:
                     parents = cmds.listRelatives(
                         d, parent=True, fullPath=False
                     ) or []
                 except RuntimeError:
                     parents = []
-                parent = parents[0] if parents else "?"
-                self._log("    - %s  (under %s)" % (d, parent))
-            if len(deforms) > 15:
-                self._log("    ... (%d more)" % (len(deforms) - 15))
+                parent_short = parents[0] if parents else "?"
 
-            # ---- Matching preview (mirrors _partition_deforms) --------
-            guide_root = roots_by_module.get(mn)
-            if not guide_root or not cmds.objExists(guide_root):
-                continue
-            descendants = cmds.listRelatives(
-                guide_root, allDescendents=True, type="joint"
-            ) or []
-            # listRelatives(ad=True) returns deep-to-shallow; reverse it
-            # and prepend root for a natural parent-first traversal.
-            guide_chain = [guide_root] + list(reversed(descendants))
-
-            self._log("    Guide matching preview:")
-            used = set()
-            for g in guide_chain:
-                gs = g.rsplit("|", 1)[-1]
-                if not gs.endswith(builder.GUIDE_SUFFIX):
-                    continue
-                match = builder.find_deform_for_guide(
-                    gs, mn, module_deforms=deforms, exclude=used
-                )
-                if match is None:
-                    self._log("      %s -> (no deform available)" % gs)
-                    continue
-                used.add(match)
-                try:
-                    gp = cmds.xform(gs, q=True, ws=True, t=True)
-                    mp = cmds.xform(match, q=True, ws=True, t=True)
-                    dist = (om.MVector(*gp) - om.MVector(*mp)).length()
+                parsed = builder.parse_def_name(short, mn, pmap)
+                if parsed is None:
                     self._log(
-                        "      %s -> %s  (dist=%.2f)" % (gs, match, dist)
+                        "    x %-40s (under %s)  -> UNPARSED" %
+                        (short, parent_short)
                     )
-                except RuntimeError:
-                    self._log("      %s -> %s  (dist=?)" % (gs, match))
+                    continue
+                seg, idx = parsed
+                mark = "ok" if seg in valid_segments else "xx"
+                idx_str = "[%d]" % idx if idx is not None else ""
+                self._log(
+                    "    %s %-40s (under %s)  -> segment=%r%s" %
+                    (mark, short, parent_short, seg, idx_str)
+                )
