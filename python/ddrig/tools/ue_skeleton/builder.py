@@ -658,26 +658,46 @@ def _create_jue_from_def(def_fullpath, jue_name):
 
 
 def _mirror_animation(def_fullpath, jue_short):
-    """Attach parent+scale constraints from def -> jUE.
+    """Wire def's animation into jUE.
 
-    Critical: ``maintainOffset=True``.  With ``maintainOffset=False``,
-    Maya forces ``jUE.worldTransform == def.worldTransform`` every
-    frame, copying DDRIG's accumulated rig-group scale into jUE's local
-    channels.  With ``maintainOffset=True``, the constraint records
-    the current (clean, scale=1) offset and only follows DEF's
-    *relative* changes from there -- so jUE's local scale stays at 1
-    in the rest pose and only deviates if the rig itself animates a
-    non-1 scale on the def joint."""
+    Translation+rotation: ``parentConstraint(maintainOffset=True)``.
+    The duplicate already aligns jUE's world transform with def's, so
+    MO=True records an identity offset and the constraint only
+    propagates def's relative changes from then on.
+
+    Scale: **direct ``connectAttr`` per channel**, NOT a
+    ``scaleConstraint``.  ``scaleConstraint`` operates in world space
+    -- it forces jUE's worldScale to equal def's worldScale, which
+    bakes DDRIG's accumulated rig-grp scale ladder into jUE's local
+    channels (the bug visible as ``Scale = (0.21, 0.71, 5.33)`` in
+    Channel Box).  A direct attribute link copies def's *local* scale
+    only; with the rig in its rest pose (def.scale = (1,1,1)) jUE's
+    scale stays exactly (1,1,1), and ribbon/squash animation that
+    moves def's local scale away from 1 propagates 1:1.
+
+    Per-channel connections (X/Y/Z) are used instead of a compound
+    ``connectAttr def.scale jue.scale`` because Maya rejects compound
+    connections when the destination's component channels have
+    already been touched (which they have -- jUE creation explicitly
+    sets scaleX/Y/Z = 1 to clear duplicate residue)."""
     try:
         cmds.parentConstraint(def_fullpath, jue_short, maintainOffset=True)
     except RuntimeError as exc:
         log.warning("parentConstraint(%s -> %s) failed: %s" %
                     (def_fullpath, jue_short, exc))
         return False
-    try:
-        cmds.scaleConstraint(def_fullpath, jue_short, maintainOffset=True)
-    except RuntimeError:
-        pass
+    for ch in ("scaleX", "scaleY", "scaleZ"):
+        try:
+            cmds.connectAttr(
+                "%s.%s" % (def_fullpath, ch),
+                "%s.%s" % (jue_short, ch),
+                force=True,
+            )
+        except RuntimeError as exc:
+            log.warning(
+                "connectAttr %s.%s -> %s.%s failed: %s" %
+                (_short(def_fullpath), ch, jue_short, ch, exc)
+            )
     return True
 
 
@@ -1028,14 +1048,12 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
 
                 cmds.parent(jue_root, attach_target)
 
-                # Force local scale back to 1 and re-apply world
-                # translation + rotation so the visual position is
-                # unchanged but the local channels are clean.
-                for ch in ("scaleX", "scaleY", "scaleZ"):
-                    try:
-                        cmds.setAttr("%s.%s" % (jue_root, ch), 1.0)
-                    except RuntimeError:
-                        pass
+                # Re-apply world translation + rotation so the visual
+                # position is unchanged after the reparent.  Scale is
+                # NOT reset here -- the connectAttr from def.scale ->
+                # jue.scale established earlier will push def's
+                # current scale (typically 1) into jUE on the next
+                # evaluation, overriding any setAttr we'd do here.
                 if pre_t is not None:
                     try:
                         cmds.xform(
