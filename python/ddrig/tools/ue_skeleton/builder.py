@@ -324,7 +324,12 @@ def collect_module_deform_joints(module_name):
     """Return all deform-purpose joints for ``module_name`` as full DAG
     paths.  Twin-layer detection -- union of DAG ancestry under limbGrp
     and skinCluster influence-under-limbGrp -- preserves DAG-scan order
-    first, then appends skin-only joints."""
+    first, then appends skin-only joints.
+
+    Joints that the skin layer pulls in but the (strict) DAG layer
+    rejected are logged at info level so users can spot non-deform
+    helpers that leaked in via skin binding (typical pattern: a user
+    accidentally bound a splineDriver joint)."""
     limb_grp = _find_limb_grp(module_name)
 
     dag_hits = _dag_scan_deforms(module_name, limb_grp)
@@ -335,6 +340,11 @@ def collect_module_deform_joints(module_name):
     result = list(dag_hits)
     for j in skin_hits:
         if j not in dag_set:
+            log.info(
+                "UE skeleton: skin-only inclusion in %s -- %s "
+                "(not in DAG defs; check if this is an intentional bind)"
+                % (module_name, _short(j))
+            )
             result.append(j)
     return result
 
@@ -544,34 +554,99 @@ def _def_to_jue_name(def_fullpath, suffix):
 
 
 def _create_jue_from_def(def_fullpath, jue_name):
-    """Create a jUE at ``def_fullpath``'s world transform, tag it with
-    ``sourceJDef`` = def's short name, and return the jUE's short name.
+    """Create a jUE at ``def_fullpath``'s world translation+rotation,
+    tagged with ``sourceJDef`` = def's short name.  Returns the jUE's
+    short name.
 
-    The jUE is created in world space -- the caller re-parents it once
-    all intra-module jUEs exist."""
+    DDRIG's nested rig groups (``rig_grp/ddrig_grp/{module}/...``) often
+    carry non-identity scale on intermediate transforms.  When we
+    duplicate a deform joint, those accumulated scales bleed into the
+    duplicate's local channels; users see jUE.scale reading something
+    like ``(0.21, 0.71, 5.33)`` -- distinctly NOT 1.  UE expects each
+    bone to start at unit scale and inherit only what the rig animation
+    tells it to.
+
+    The 5-step recipe below produces a jUE whose local scale is exactly
+    ``(1, 1, 1)`` and whose world translation/rotation match the def
+    joint (scale is intentionally NOT mirrored to world):
+
+        1. ``cmds.duplicate(parentOnly=True)`` -- copy the joint without
+           shapes/children.
+        2. Re-parent the duplicate under the world so we have a clean
+           context to wipe local channels.
+        3. Capture the def's world translation + rotation (NOT scale).
+        4. Reset duplicate's local ``scale`` to 1, ``shear`` to 0, and
+           ``jointOrient`` to 0 -- this kills any inherited residue.
+        5. Re-apply the captured world translation + rotation via
+           ``xform``; tag ``sourceJDef``; disable ``segmentScaleCompensate``.
+    """
     cmds.select(clear=True)
+
+    # Step 1: duplicate the def joint shapeless / childless.
     dup = cmds.duplicate(def_fullpath, name=jue_name, parentOnly=True)[0]
     dup_short = _short(dup)
-    # Move to world if duplicate landed under def's parent.
+
+    # Step 2: detach to world so we can clean local channels safely.
     try:
         if cmds.listRelatives(dup_short, parent=True, fullPath=True):
-            cmds.parent(dup_short, world=True)
+            dup_short = _short(cmds.parent(dup_short, world=True)[0])
     except RuntimeError:
         pass
-    # Reassert transform (guards against any drift from duplicate).
+
+    # Step 3: capture def's world translation + rotation (intentionally
+    # NOT world scale -- mirroring world scale is what poisons the
+    # local channels).
     try:
-        matrix = cmds.xform(
-            def_fullpath, query=True, worldSpace=True, matrix=True
+        def_world_t = cmds.xform(
+            def_fullpath, query=True, worldSpace=True, translation=True
         )
-        cmds.xform(dup_short, worldSpace=True, matrix=matrix)
     except RuntimeError:
-        pass
-    # UE does not grok Maya's segmentScaleCompensate.
+        def_world_t = None
+    try:
+        def_world_ro = cmds.xform(
+            def_fullpath, query=True, worldSpace=True, rotation=True
+        )
+    except RuntimeError:
+        def_world_ro = None
+
+    # Step 4: reset local channels on the duplicate.
+    for ch in ("scaleX", "scaleY", "scaleZ"):
+        try:
+            cmds.setAttr("%s.%s" % (dup_short, ch), 1.0)
+        except RuntimeError:
+            pass
+    for ch in ("shearXY", "shearXZ", "shearYZ"):
+        try:
+            cmds.setAttr("%s.%s" % (dup_short, ch), 0.0)
+        except RuntimeError:
+            pass
+    if cmds.attributeQuery("jointOrient", node=dup_short, exists=True):
+        try:
+            cmds.setAttr(
+                "%s.jointOrient" % dup_short, 0, 0, 0, type="double3"
+            )
+        except RuntimeError:
+            pass
+
+    # Step 5: re-apply translation + rotation; tag; SSC off.
+    if def_world_t is not None:
+        try:
+            cmds.xform(
+                dup_short, worldSpace=True, translation=def_world_t
+            )
+        except RuntimeError:
+            pass
+    if def_world_ro is not None:
+        try:
+            cmds.xform(
+                dup_short, worldSpace=True, rotation=def_world_ro
+            )
+        except RuntimeError:
+            pass
     try:
         cmds.setAttr("%s.segmentScaleCompensate" % dup_short, 0)
     except RuntimeError:
         pass
-    # Tag source.
     if not cmds.attributeQuery(_SOURCE_ATTR, node=dup_short, exists=True):
         cmds.addAttr(dup_short, longName=_SOURCE_ATTR, dataType="string")
     cmds.setAttr(
@@ -583,16 +658,24 @@ def _create_jue_from_def(def_fullpath, jue_name):
 
 
 def _mirror_animation(def_fullpath, jue_short):
-    """Attach parent+scale constraints from def -> jUE so the UE joint
-    follows the DDRIG deform joint every frame."""
+    """Attach parent+scale constraints from def -> jUE.
+
+    Critical: ``maintainOffset=True``.  With ``maintainOffset=False``,
+    Maya forces ``jUE.worldTransform == def.worldTransform`` every
+    frame, copying DDRIG's accumulated rig-group scale into jUE's local
+    channels.  With ``maintainOffset=True``, the constraint records
+    the current (clean, scale=1) offset and only follows DEF's
+    *relative* changes from there -- so jUE's local scale stays at 1
+    in the rest pose and only deviates if the rig itself animates a
+    non-1 scale on the def joint."""
     try:
-        cmds.parentConstraint(def_fullpath, jue_short, maintainOffset=False)
+        cmds.parentConstraint(def_fullpath, jue_short, maintainOffset=True)
     except RuntimeError as exc:
         log.warning("parentConstraint(%s -> %s) failed: %s" %
                     (def_fullpath, jue_short, exc))
         return False
     try:
-        cmds.scaleConstraint(def_fullpath, jue_short, maintainOffset=False)
+        cmds.scaleConstraint(def_fullpath, jue_short, maintainOffset=True)
     except RuntimeError:
         pass
     return True
@@ -929,7 +1012,44 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
                 ) or []
                 if current and current[0] == attach_target:
                     continue
+                # Capture world transform BEFORE reparent -- the
+                # reparent itself recomputes local channels and can
+                # introduce scale residue if the new parent has
+                # non-identity inherited scale.
+                try:
+                    pre_t = cmds.xform(
+                        jue_root, query=True, worldSpace=True, translation=True
+                    )
+                    pre_ro = cmds.xform(
+                        jue_root, query=True, worldSpace=True, rotation=True
+                    )
+                except RuntimeError:
+                    pre_t = pre_ro = None
+
                 cmds.parent(jue_root, attach_target)
+
+                # Force local scale back to 1 and re-apply world
+                # translation + rotation so the visual position is
+                # unchanged but the local channels are clean.
+                for ch in ("scaleX", "scaleY", "scaleZ"):
+                    try:
+                        cmds.setAttr("%s.%s" % (jue_root, ch), 1.0)
+                    except RuntimeError:
+                        pass
+                if pre_t is not None:
+                    try:
+                        cmds.xform(
+                            jue_root, worldSpace=True, translation=pre_t
+                        )
+                    except RuntimeError:
+                        pass
+                if pre_ro is not None:
+                    try:
+                        cmds.xform(
+                            jue_root, worldSpace=True, rotation=pre_ro
+                        )
+                    except RuntimeError:
+                        pass
             except RuntimeError as exc:
                 log.warning(
                     "UE skeleton build: cross-module parent %s under %s "
