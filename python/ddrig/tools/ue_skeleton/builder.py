@@ -658,46 +658,32 @@ def _create_jue_from_def(def_fullpath, jue_name):
 
 
 def _mirror_animation(def_fullpath, jue_short):
-    """Wire def's animation into jUE.
+    """Attach parent + scale constraints from def -> jUE with
+    ``maintainOffset=True``.
 
-    Translation+rotation: ``parentConstraint(maintainOffset=True)``.
-    The duplicate already aligns jUE's world transform with def's, so
-    MO=True records an identity offset and the constraint only
-    propagates def's relative changes from then on.
+    This function is called in Phase 4 of the build pipeline, AFTER
+    every jUE has been created, intra-module parented, cross-module
+    attached, and frozen via ``makeIdentity(rotate=True, scale=True)``.
+    By that point jUE is in a clean rest pose (translate = world
+    position, rotate = (0,0,0), scale = (1,1,1), jointOrient set
+    correctly) so the constraint records a clean identity offset and
+    subsequent rig animation propagates without baking in any
+    inherited scale or rotation residue.
 
-    Scale: **direct ``connectAttr`` per channel**, NOT a
-    ``scaleConstraint``.  ``scaleConstraint`` operates in world space
-    -- it forces jUE's worldScale to equal def's worldScale, which
-    bakes DDRIG's accumulated rig-grp scale ladder into jUE's local
-    channels (the bug visible as ``Scale = (0.21, 0.71, 5.33)`` in
-    Channel Box).  A direct attribute link copies def's *local* scale
-    only; with the rig in its rest pose (def.scale = (1,1,1)) jUE's
-    scale stays exactly (1,1,1), and ribbon/squash animation that
-    moves def's local scale away from 1 propagates 1:1.
-
-    Per-channel connections (X/Y/Z) are used instead of a compound
-    ``connectAttr def.scale jue.scale`` because Maya rejects compound
-    connections when the destination's component channels have
-    already been touched (which they have -- jUE creation explicitly
-    sets scaleX/Y/Z = 1 to clear duplicate residue)."""
+    Calling this BEFORE the freeze pass would lock the dirty duplicate
+    state into the constraint offset -- the exact bug that previous
+    revisions tried to fix with MO toggles and connectAttr."""
     try:
         cmds.parentConstraint(def_fullpath, jue_short, maintainOffset=True)
     except RuntimeError as exc:
         log.warning("parentConstraint(%s -> %s) failed: %s" %
                     (def_fullpath, jue_short, exc))
         return False
-    for ch in ("scaleX", "scaleY", "scaleZ"):
-        try:
-            cmds.connectAttr(
-                "%s.%s" % (def_fullpath, ch),
-                "%s.%s" % (jue_short, ch),
-                force=True,
-            )
-        except RuntimeError as exc:
-            log.warning(
-                "connectAttr %s.%s -> %s.%s failed: %s" %
-                (_short(def_fullpath), ch, jue_short, ch, exc)
-            )
+    try:
+        cmds.scaleConstraint(def_fullpath, jue_short, maintainOffset=True)
+    except RuntimeError as exc:
+        log.warning("scaleConstraint(%s -> %s) failed: %s" %
+                    (def_fullpath, jue_short, exc))
     return True
 
 
@@ -834,19 +820,39 @@ def delete_ue_skeleton(group_name=UE_GROUP):
 def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
     """Core build logic (no undo-chunk wrapping, no kwarg shuffling).
 
-    Pipeline:
-        1. Pre-build conflict clear + orphan sweep.
-        2. Create root joint + holder group.
-        3. Per module: ``collect_module_deform_joints`` ->
-           ``build_module_topology`` -> create jUE for every pair ->
-           intra-module reparent.
-        4. Cross-module reparent: each module's jUE root attaches to
-           the parent module's spatially nearest jUE (or to the root
-           jUE when the guide root has no joint ancestor in another
-           module).
-        5. Constraint drivers per (def -> jUE).
+    Pipeline (four phases after setup):
+
+        Setup) Pre-build conflict clear + orphan sweep; create the
+            holder group + root jUE joint; enumerate scene roots.
+
+        Phase 1) Per module: collect_module_deform_joints ->
+            build_module_topology -> create one jUE per ``(child_def,
+            parent_def)`` pair using a 5-step duplicate+clean recipe;
+            intra-module parent within the same module.  **No
+            constraints are created in this phase** -- they are
+            deferred to Phase 4 so the jUE can be frozen first.
+
+        Phase 2) Cross-module reparent: each module's jUE root attaches
+            to the spatially nearest jUE of the module its guide_root's
+            joint-ancestor belongs to (resolved via
+            _find_owning_module_by_guide); falls back to root_jUE for
+            top-level modules.  World translation+rotation are restored
+            after every reparent so the visual pose is preserved.
+
+        Phase 3) Freeze rotate + scale on every jUE leaf-first
+            (translate preserved): rotation residue collapses into
+            jointOrient, scale residue resets to 1, world position is
+            unchanged.  This is the critical step that previous
+            revisions skipped -- it produces a clean rest pose for
+            Phase 4 to constrain against.
+
+        Phase 4) Constraint pass: parentConstraint + scaleConstraint
+            with maintainOffset=True for every (def -> jUE) pair.
+            Because Phase 3 made jUE clean, the recorded offset is an
+            identity transform; subsequent rig animation propagates
+            faithfully without baking in any scale pollution.
     """
-    # -------- 1) Conflict pre-check ----------------------------------------
+    # -------- Setup A) Conflict pre-check ---------------------------------
     if cmds.objExists(group_name):
         log.warning(
             "UE skeleton build: pre-clearing existing %r "
@@ -889,7 +895,7 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
             (orphans_cleaned, orphans_kept)
         )
 
-    # -------- 2) Root group + root joint -----------------------------------
+    # -------- Setup B) Root group + root jUE -------------------------------
     group = cmds.group(empty=True, name=group_name)
     cmds.select(clear=True)
     ue_root = cmds.joint(name=root_name)
@@ -900,7 +906,7 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
     except RuntimeError:
         pass
 
-    # -------- 3) Per-module intra-chain ------------------------------------
+    # -------- Phase 1) Per-module create + intra-chain parent --------------
     from ddrig.base import initials
     try:
         scene_roots = initials.Initials().get_scene_roots()
@@ -981,11 +987,8 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
                     % (child_jue, parent_jue, exc)
                 )
 
-        # 3c) Constraint drivers.
-        for (child_def, _parent_def) in chain:
-            jue = jue_map.get(child_def)
-            if jue:
-                _mirror_animation(child_def, jue)
+        # No constraints here -- they are deferred to Phase 4 so the
+        # jUE can be frozen (rotate -> jointOrient, scale -> 1) first.
 
         per_module[mn] = {
             "jue_map": jue_map,
@@ -995,7 +998,7 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
         log.info("UE skeleton build: %s (%s): %d jUE joints"
                  % (mn, mtype, len(jue_map)))
 
-    # -------- 4) Cross-module attachment -----------------------------------
+    # -------- Phase 2) Cross-module attachment -----------------------------
     for mn, data in per_module.items():
         info = next((r for r in scene_roots if r["module_name"] == mn), None)
         if not info:
@@ -1075,6 +1078,59 @@ def _build_ue_skeleton_impl(root_name, group_name, suffix, prefix_map):
                 )
         log.info("UE skeleton build: %s attached under %s" %
                  (mn, attach_target))
+
+    # -------- Phase 3) Freeze rotate + scale on every jUE ------------------
+    # Every jUE up to this point still carries dirty local channels
+    # inherited from the duplicate of its source def joint -- rotation
+    # residue, jointOrient residue, and scale residue from DDRIG's
+    # accumulated rig-grp scale ladder.  Freezing rotate+scale (with
+    # translate explicitly preserved) bakes:
+    #     rotate  -> jointOrient    (jUE pose preserved as orient)
+    #     scale   -> 1              (channels reset; world position
+    #                                unchanged because the jUE chain
+    #                                above has identity scale)
+    # producing a UE-pipeline-friendly clean rest pose before any
+    # constraint is attached.  Leaf-first ordering is defensive --
+    # makeIdentity already handles hierarchies internally, but explicit
+    # ordering avoids edge cases when a parent freeze affects a child's
+    # local channels.
+    all_jue = [ue_root_short]
+    for data in per_module.values():
+        all_jue.extend(data["jue_map"].values())
+
+    def _depth(j):
+        try:
+            full = cmds.ls(j, long=True) or []
+            return len(full[0].split("|")) if full else 0
+        except RuntimeError:
+            return 0
+    all_jue_sorted = sorted(all_jue, key=_depth, reverse=True)
+
+    for j in all_jue_sorted:
+        if not cmds.objExists(j):
+            continue
+        try:
+            cmds.makeIdentity(
+                j, apply=True,
+                translate=False, rotate=True, scale=True, normal=False,
+            )
+        except RuntimeError as exc:
+            log.warning(
+                "UE skeleton build: freeze %s failed: %s" % (j, exc)
+            )
+
+    # -------- Phase 4) Constraint pass -------------------------------------
+    # All jUE are now in clean state (translate = world position,
+    # rotate = (0,0,0), scale = (1,1,1), jointOrient correct).  Building
+    # parentConstraint + scaleConstraint with maintainOffset=True
+    # records a clean identity offset; subsequent rig animation (def
+    # joints driven by DDRIG controllers) propagates to jUE without
+    # scale pollution.
+    for mn, data in per_module.items():
+        for child_def, jue in data["jue_map"].items():
+            if not cmds.objExists(child_def) or not cmds.objExists(jue):
+                continue
+            _mirror_animation(child_def, jue)
 
     if all_warnings:
         log.info("UE skeleton build: %d warning(s)" % len(all_warnings))
