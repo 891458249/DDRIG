@@ -61,8 +61,11 @@ class LegNoRoot(ModuleCore):
             self.toe_pv_ref = build_data["ToePV"]
             self.bank_in_ref = build_data["BankIN"]
             self.bank_out_ref = build_data["BankOUT"]
-            # leg_noRoot: hip is the module root.  Alias so legacy
-            # references to leg_root_ref keep working.
+            # leg_noRoot: hip is the module root -- alias the
+            # ``leg_root_ref`` field for the read-only references that
+            # remain (positional alignment, side / moduleName / axis
+            # attribute lookups).  We do NOT alias ``leg_root_j_def``
+            # the same way; see ``create_joints`` for why.
             self.leg_root_ref = self.hip_ref
             self.inits = [
                 self.hip_ref,
@@ -86,8 +89,8 @@ class LegNoRoot(ModuleCore):
             self.toe_pv_ref = inits[5]
             self.bank_in_ref = inits[6]
             self.bank_out_ref = inits[7]
-            # leg_noRoot: hip is the module root.  Alias so legacy
-            # references to leg_root_ref keep working.
+            # leg_noRoot: hip is the module root.  Alias so the
+            # read-only references to leg_root_ref keep working.
             self.leg_root_ref = self.hip_ref
             self.inits = inits
         else:
@@ -200,17 +203,25 @@ class LegNoRoot(ModuleCore):
         )
 
         # leg_noRoot: skip legRoot_jDef.  Hip is the module root deform
-        # joint and will become the direct child of limbPlug.
+        # joint and becomes the direct child of limbPlug.
         self.hip_j_def = cmds.joint(
             name=naming.parse([self.module_name, "hip"], suffix="jDef"),
             position=self.hip_pos,
             radius=1.5,
         )
         self.sockets.append(self.hip_j_def)
-        # Alias so downstream code referring to leg_root_j_def keeps
-        # working (line 487 deformerJoints append, lines 1771/1785
-        # IK constraint hookups, line 2392 align reference, ...).
-        self.leg_root_j_def = self.hip_j_def
+        # IMPORTANT: leg_root_j_def is NOT aliased to hip_j_def.  The
+        # earlier alias caused the call at the bottom of
+        # create_ik_setup -- ``cmds.parent(self.leg_root_j_def,
+        # pacon_locator_hip)`` -- to drag hip_j_def out of limbPlug's
+        # subtree and into pacon_locator_hip's subtree, which broke
+        # the IK -> mid_lock -> knee_jDef rotation chain in subtle
+        # ways.  Instead we leave the field as None and route the
+        # three remaining call sites explicitly to hip_j_def below
+        # (positional alignments) or replace them with a constraint
+        # (the suspect reparent), preserving hip's original DAG
+        # location under limbPlug.
+        self.leg_root_j_def = None
 
         if not self.useRefOrientation:
             joint.orient_joints(
@@ -1785,7 +1796,7 @@ class LegNoRoot(ModuleCore):
             name=naming.parse([self.module_name, "pacon"], suffix="loc")
         )[0]
         functions.align_to(
-            pacon_locator_hip, self.leg_root_j_def, position=True, rotation=True
+            pacon_locator_hip, self.hip_j_def, position=True, rotation=True
         )
         #
         _pa_con_j_def = cmds.parentConstraint(
@@ -1799,7 +1810,18 @@ class LegNoRoot(ModuleCore):
         cmds.parent(self.end_lock_ore, self.scaleGrp)
 
         cmds.parent(pacon_locator_hip, self.scaleGrp)
-        cmds.parent(self.leg_root_j_def, pacon_locator_hip)
+        # leg.py here did ``cmds.parent(self.leg_root_j_def,
+        # pacon_locator_hip)`` to reparent the legRoot subtree under
+        # the locator so legRoot (and the hip child below it) would
+        # follow cont_thigh.  In leg_noRoot there is no separate
+        # legRoot joint; reparenting hip_j_def itself out of limbPlug
+        # broke knee_jDef's rotation chain (the previous alias had
+        # this exact effect).  Use a parentConstraint instead so hip
+        # stays as a child of limbPlug in the DAG and only inherits
+        # locator's transform via the constraint.
+        cmds.parentConstraint(
+            pacon_locator_hip, self.hip_j_def, maintainOffset=True
+        )
         #
         cmds.connectAttr("%s.rigVis" % self.scaleGrp, "%s.v" % leg_start)
         cmds.connectAttr("%s.rigVis" % self.scaleGrp, "%s.v" % leg_end)
@@ -2406,7 +2428,7 @@ class LegNoRoot(ModuleCore):
         cmds.parentConstraint(
             self.cont_IK_foot.name, angle_ext_fixed_ik, maintainOffset=False
         )
-        functions.align_to_alter(angle_ext_float_ik, self.leg_root_j_def, 2)
+        functions.align_to_alter(angle_ext_float_ik, self.hip_j_def, 2)
         cmds.move(0, self.sideMult * 5, 0, angle_ext_float_ik, objectSpace=True)
 
         angle_node_ik = cmds.createNode(
