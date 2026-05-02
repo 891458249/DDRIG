@@ -1076,7 +1076,33 @@ class LegNoRoot(ModuleCore):
         self.mid_lock = cmds.spaceLocator(
             name=naming.parse([self.module_name, "midLock"], suffix="loc")
         )[0]
-        cmds.parentConstraint(self.mid_lock, self.mid_leg_j_def)
+        # mid_leg_j_def takes its translation from mid_lock; rotation is
+        # driven by the pairBlend half-rotation chain set up below
+        # (mirrors arm.elbow_jDef's direct-driver pattern, replacing the
+        # fragile multi-stage mid_lock rotate chain inherited from leg's
+        # original implementation).
+        cmds.pointConstraint(self.mid_lock, self.mid_leg_j_def)
+        # Half-rotation driver: pairBlend reads ik_orig_knee_j's rotate
+        # (the IK-resolved knee bend angle in joint-local space), blends
+        # against an identity baseline at weight 0.5, and writes the
+        # result onto mid_leg_j_def.rotate.  Independent of any DAG /
+        # parentConstraint chain.
+        knee_half_pb = cmds.createNode(
+            "pairBlend",
+            name=naming.parse(
+                [self.module_name, "knee", "halfRot"], suffix="pb"
+            ),
+        )
+        cmds.connectAttr(
+            "%s.rotate" % self.ik_orig_knee_j,
+            "%s.inRotate1" % knee_half_pb,
+        )
+        cmds.setAttr("%s.weight" % knee_half_pb, 0.5)
+        cmds.setAttr("%s.rotInterpolation" % knee_half_pb, 1)
+        cmds.connectAttr(
+            "%s.outRotate" % knee_half_pb,
+            "%s.rotate" % self.mid_leg_j_def,
+        )
         cmds.parentConstraint(
             self.cont_mid_lock.name, self.mid_lock, maintainOffset=False
         )
