@@ -15,13 +15,8 @@ LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": [
-        # leg_noRoot omits the LegRoot guide.  The deform / IK chain
-        # that requires a "leg_root" anchor as a DAG ancestor of hip
-        # is recreated INSIDE create_joints with a hidden anchor joint
-        # (see ``self.leg_root_j_def`` assignment there) -- no LegRoot
-        # exposed to the user, but the rig graph stays identical to
-        # ``leg`` in every way that matters for animation.
-        "LegNoRootHip",
+        "LegRoot",
+        "Hip",
         "Knee",
         "Foot",
         "Ball",
@@ -37,33 +32,30 @@ LIMB_DATA = {
 
 
 class LegNoRoot(ModuleCore):
-    """Variant of :class:`ddrig.modules.leg.Leg` whose guide chain
-    omits the LegRoot guide joint.  Hip is the module's root guide.
+    """Build-time clone of :class:`ddrig.modules.leg.Leg`.
 
-    The internal rig graph is **the same as leg's** -- a hidden
-    ``{module}_anchor_j`` joint is created in :meth:`create_joints`
-    to play the structural role that ``_legRoot_jDef`` played in
-    leg.py: parent of ``hip_j_def`` in the DAG, child of
-    ``pacon_locator_hip`` after IK setup.  The downstream IK -> mid_lock
-    -> ``mid_leg_j_def`` (= ``_knee_jDef``) bend-bisecting chain depends
-    on this DAG ancestry, so we cannot remove the joint outright -- only
-    rename + hide it.
+    The class body is intentionally a verbatim copy of ``Leg`` -- the
+    leg module's IK / mid_lock / ribbon / knee_jDef bend-bisecting
+    chain depends on a real LegRoot guide + ``_legRoot_jDef`` deform
+    joint; previous attempts to remove it (alias / explicit reference
+    rewriting / hidden-anchor build joint) all silently broke the
+    chain.
 
-    The anchor's name is ``{module}_anchor_j`` (suffix ``_j``, NOT
-    ``_jDef``); UE Skeleton's strict ``_dag_scan_deforms`` filters out
-    every ``_j`` that isn't the exact ``{module}_j`` base singleton, so
-    the anchor never leaks into the export skeleton."""
+    leg_noRoot keeps the proven build path 100% intact and instead
+    tames LegRoot at the **guide** stage: the guide is created, but
+    visibility-hidden, template-locked (un-selectable in the
+    viewport), rotate/scale-locked, and pointConstrained to Hip so it
+    automatically tracks Hip's world position when the user moves
+    Hip.  The user only sees and interacts with Hip; build-time code
+    -- including ``inits[0] = leg_root_ref`` -- continues to find a
+    real LegRoot guide at the right world position."""
 
     name = "LegNoRoot"
     def __init__(self, build_data=None, inits=None):
         super(LegNoRoot, self).__init__()
         if build_data:
-            # leg_noRoot: LegRoot is gone.  Hip is the data source for
-            # moduleName / side / useRefOri / etc; the ``leg_root_ref``
-            # field is kept as an alias so the rest of the (copied
-            # verbatim from leg.py) implementation reads the right
-            # attributes off the right joint.
-            self.hip_ref = build_data["LegNoRootHip"]
+            self.leg_root_ref = build_data["LegRoot"]
+            self.hip_ref = build_data["Hip"]
             self.knee_ref = build_data["Knee"]
             self.foot_ref = build_data["Foot"]
             self.ball_ref = build_data["Ball"]
@@ -71,8 +63,8 @@ class LegNoRoot(ModuleCore):
             self.toe_pv_ref = build_data["ToePV"]
             self.bank_in_ref = build_data["BankIN"]
             self.bank_out_ref = build_data["BankOUT"]
-            self.leg_root_ref = self.hip_ref
             self.inits = [
+                self.leg_root_ref,
                 self.hip_ref,
                 self.knee_ref,
                 self.foot_ref,
@@ -83,27 +75,25 @@ class LegNoRoot(ModuleCore):
                 self.bank_out_ref,
             ]
         elif inits:
-            if len(inits) < 8:
-                cmds.error("Some or all LegNoRoot Init Bones are missing (or Renamed)")
+            if len(inits) < 9:
+                cmds.error("Some or all Leg Init Bones are missing (or Renamed)")
                 return
-            self.hip_ref = inits[0]
-            self.knee_ref = inits[1]
-            self.foot_ref = inits[2]
-            self.ball_ref = inits[3]
-            self.heel_pv_ref = inits[4]
-            self.toe_pv_ref = inits[5]
-            self.bank_in_ref = inits[6]
-            self.bank_out_ref = inits[7]
-            self.leg_root_ref = self.hip_ref
+            self.leg_root_ref = inits[0]
+            self.hip_ref = inits[1]
+            self.knee_ref = inits[2]
+            self.foot_ref = inits[3]
+            self.ball_ref = inits[4]
+            self.heel_pv_ref = inits[5]
+            self.toe_pv_ref = inits[6]
+            self.bank_in_ref = inits[7]
+            self.bank_out_ref = inits[8]
             self.inits = inits
         else:
             LOG.error("Class needs either build_data or arm inits to be constructed")
 
-        # get positions -- leg_root_pos is aliased to hip_pos so the
-        # rest of the file (copied verbatim from leg.py) sees a valid
-        # world position at every reference.
+        # get positions
+        self.leg_root_pos = api.get_world_translation(self.leg_root_ref)
         self.hip_pos = api.get_world_translation(self.hip_ref)
-        self.leg_root_pos = self.hip_pos
         self.knee_pos = api.get_world_translation(self.knee_ref)
         self.foot_pos = api.get_world_translation(self.foot_ref)
         self.ball_pos = api.get_world_translation(self.ball_ref)
@@ -207,29 +197,11 @@ class LegNoRoot(ModuleCore):
             radius=3,
         )
 
-        # leg_noRoot: hidden anchor joint replaces the public
-        # ``_legRoot_jDef`` of leg.py.  Same DAG role (parent of hip,
-        # later child of pacon_locator_hip), so the IK / mid_lock /
-        # ribbon chain that drives knee_jDef bend-bisecting still
-        # works.  Naming intentionally uses the ``_j`` suffix (not
-        # ``_jDef``) so it is never picked up as a deform joint:
-        #   * skinCluster / def_jointsSet won't enrol it
-        #   * UE Skeleton's _dag_scan_deforms strict policy only
-        #     accepts ``_j`` joints whose short name equals
-        #     ``{module_name}_j``; ``{module_name}_anchor_j`` does
-        #     not match, so it never leaks into the export skeleton
-        # visibility=0 hides it from the user; the DAG hierarchy
-        # underneath (hip / knee / ...) inherits visibility from
-        # higher up so the visible rig is unaffected.
         self.leg_root_j_def = cmds.joint(
-            name=naming.parse([self.module_name, "anchor"], suffix="j"),
+            name=naming.parse([self.module_name, "legRoot"], suffix="jDef"),
             position=self.leg_root_pos,
-            radius=0.1,
+            radius=1.5,
         )
-        try:
-            cmds.setAttr("%s.visibility" % self.leg_root_j_def, 0)
-        except RuntimeError:
-            pass
         self.sockets.append(self.leg_root_j_def)
         self.hip_j_def = cmds.joint(
             name=naming.parse([self.module_name, "hip"], suffix="jDef"),
@@ -527,13 +499,10 @@ class LegNoRoot(ModuleCore):
         cmds.parent(self.fk_root_j, self.scaleGrp)
         cmds.parent(self.foot_j_def, self.scaleGrp)
 
-        # leg_noRoot: anchor (self.leg_root_j_def) is intentionally NOT
-        # added to deformerJoints -- it is a hidden structural joint,
-        # not a real deform joint, and must not appear in
-        # ``def_jointsSet_*`` or skinCluster influence pickers.
         self.deformerJoints += [
             self.mid_leg_j_def,
             self.hip_j_def,
+            self.leg_root_j_def,
             self.foot_j_def,
             self.ball_j_def,
         ]
@@ -2559,6 +2528,18 @@ class LegNoRoot(ModuleCore):
 
 
 class Guides(GuidesCore):
+    """Guide-stage variant of :class:`ddrig.modules.leg.Guides`.
+
+    The full guide chain (LegRoot, Hip, Knee, ...) is still drawn so
+    the build pipeline (which copies ``leg.Leg`` verbatim) finds a
+    valid ``inits[0] = LegRoot`` to consume.  LegRoot is then made
+    invisible, un-selectable, rotate/scale-locked, and pointConstrained
+    to Hip so it tracks Hip's position automatically -- the user only
+    sees Hip and never has to position LegRoot manually."""
+
+    # Distinct ``name`` so guide joints carry a leg_noRoot-specific
+    # prefix (``L_legNoRoot_*_jInit``) and never collide with regular
+    # ``leg`` guides (``L_leg_*_jInit``) when both modules coexist.
     name = "LegNoRoot"
     limb_data = LIMB_DATA
 
@@ -2588,14 +2569,14 @@ class Guides(GuidesCore):
             toepv_vec = om.MVector(5 * self.sideMultiplier, 0, 4.3) * self.tMatrix
             heelpv_vec = om.MVector(5 * self.sideMultiplier, 0, -0.2) * self.tMatrix
 
-        # Define the offset vector (computed against the conceptual
-        # root_vec position so the directional math stays identical
-        # to leg.py, even though we don't draw a legRoot guide).
+        # Define the offset vector
         self.offsetVector = -((root_vec - hip_vec).normal())
 
-        # Draw the joints & set orientation.  leg_noRoot starts the
-        # chain at hip -- no legRoot guide is created.
-        cmds.select(clear=True)
+        # Draw the joints & set orientation
+        root = cmds.joint(
+            position=root_vec,
+            name=naming.parse([self.name, "legRoot"], side=self.side, suffix="jInit"),
+        )
         hip = cmds.joint(
             position=hip_vec,
             name=naming.parse([self.name, "hip"], side=self.side, suffix="jInit"),
@@ -2609,7 +2590,7 @@ class Guides(GuidesCore):
             name=naming.parse([self.name, "foot"], side=self.side, suffix="jInit"),
         )
         joint.orient_joints(
-            [hip, knee, foot],
+            [root, hip, knee, foot],
             world_up_axis=self.mirrorVector,
             up_axis=(0, 1, 0),
             reverse_aim=self.sideMultiplier,
@@ -2656,9 +2637,40 @@ class Guides(GuidesCore):
             reverse_aim=self.sideMultiplier,
         )
 
-        # Update the guideJoints list -- legRoot dropped; every
-        # subsequent index shifts by -1 vs leg.py.
+        # ---- leg_noRoot: hide + lock the LegRoot guide ------------------
+        # LegRoot is structurally required (build pipeline reads it as
+        # inits[0]) but the user should never have to position or even
+        # see it.  Snap LegRoot to Hip's world position, point-constrain
+        # it to Hip so it tracks Hip from now on, hide it visually, mark
+        # it as a template (un-selectable in the viewport), and lock its
+        # rotate/scale channels.  Translate is left unlocked because the
+        # constraint drives it; locking would error.
+        try:
+            hip_world = cmds.xform(hip, query=True, worldSpace=True, translation=True)
+            cmds.xform(root, worldSpace=True, translation=hip_world)
+        except RuntimeError:
+            pass
+        try:
+            cmds.pointConstraint(hip, root, maintainOffset=False)
+        except RuntimeError:
+            pass
+        try:
+            cmds.setAttr("%s.visibility" % root, 0)
+        except RuntimeError:
+            pass
+        try:
+            cmds.setAttr("%s.template" % root, 1)
+        except RuntimeError:
+            pass
+        for _ch in ("rx", "ry", "rz", "sx", "sy", "sz"):
+            try:
+                cmds.setAttr("%s.%s" % (root, _ch), lock=True)
+            except RuntimeError:
+                pass
+
+        # Update the guideJoints list
         self.guideJoints = [
+            root,
             hip,
             knee,
             foot,
@@ -2671,17 +2683,14 @@ class Guides(GuidesCore):
         ]
 
     def define_guides(self):
-        """Override the guide definition method.  Indices are leg.py
-        minus 1 because the LegRoot guide is gone.  The root guide
-        carries the module-unique label ``LegNoRootHip`` so
-        joint.identify cannot confuse a regular ``leg``'s
-        second-position "Hip" guide for a leg_noRoot root."""
-        joint.set_joint_type(self.guideJoints[0], "LegNoRootHip")
-        joint.set_joint_type(self.guideJoints[1], "Knee")
-        joint.set_joint_type(self.guideJoints[2], "Foot")
-        joint.set_joint_type(self.guideJoints[3], "Ball")
-        joint.set_joint_type(self.guideJoints[4], "Toe")
-        joint.set_joint_type(self.guideJoints[5], "BankOUT")
-        joint.set_joint_type(self.guideJoints[6], "BankIN")
-        joint.set_joint_type(self.guideJoints[7], "ToePV")
-        joint.set_joint_type(self.guideJoints[8], "HeelPV")
+        """Override the guide definition method"""
+        joint.set_joint_type(self.guideJoints[0], "LegRoot")
+        joint.set_joint_type(self.guideJoints[1], "Hip")
+        joint.set_joint_type(self.guideJoints[2], "Knee")
+        joint.set_joint_type(self.guideJoints[3], "Foot")
+        joint.set_joint_type(self.guideJoints[4], "Ball")
+        joint.set_joint_type(self.guideJoints[5], "Toe")
+        joint.set_joint_type(self.guideJoints[6], "BankOUT")
+        joint.set_joint_type(self.guideJoints[7], "BankIN")
+        joint.set_joint_type(self.guideJoints[8], "ToePV")
+        joint.set_joint_type(self.guideJoints[9], "HeelPV")
