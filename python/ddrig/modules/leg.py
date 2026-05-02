@@ -1033,30 +1033,9 @@ class Leg(ModuleCore):
         # fragile multi-stage mid_lock rotate chain inherited from leg's
         # original implementation).
         cmds.pointConstraint(self.mid_lock, self.mid_leg_j_def)
-        # Half-rotation driver: pairBlend reads ik_orig_knee_j's rotate
-        # (the IK-resolved knee bend angle in joint-local space), blends
-        # against an identity baseline at weight 0.5, and writes the
-        # result onto mid_leg_j_def.rotate.  The output is a clean 50%
-        # bend regardless of any DAG / parentConstraint quirks the
-        # downstream chain might introduce.  rotInterpolation=1
-        # (quaternion) avoids gimbal artefacts when the bend axis
-        # involves more than just Z.
-        knee_half_pb = cmds.createNode(
-            "pairBlend",
-            name=naming.parse(
-                [self.module_name, "knee", "halfRot"], suffix="pb"
-            ),
-        )
-        cmds.connectAttr(
-            "%s.rotate" % self.ik_orig_knee_j,
-            "%s.inRotate1" % knee_half_pb,
-        )
-        cmds.setAttr("%s.weight" % knee_half_pb, 0.5)
-        cmds.setAttr("%s.rotInterpolation" % knee_half_pb, 1)
-        cmds.connectAttr(
-            "%s.outRotate" % knee_half_pb,
-            "%s.rotate" % self.mid_leg_j_def,
-        )
+        # mid_leg_j_def's rotate is driven by a pairBlend half-rotation
+        # chain created in create_def_joints once the lower-leg ribbon
+        # exists -- see ``knee_half_pb`` block there.
         cmds.parentConstraint(
             self.cont_mid_lock.name, self.mid_lock, maintainOffset=False
         )
@@ -2162,6 +2141,34 @@ class Leg(ModuleCore):
         ribbon_lower_leg.create()
         ribbon_lower_leg.pin_start(self.mid_lock)
         ribbon_start_pa_con_lower_leg_end = ribbon_lower_leg.pin_end(self.end_lock)[0]
+
+        # ---- Half-rotation driver for mid_leg_j_def (= knee_jDef) ------
+        # Source is the lower-leg ribbon's start_aim group rather than
+        # the raw IK knee joint -- the ribbon's start_aim represents the
+        # resolved bend orientation (taking the mid_lock chain and
+        # IK/FK switches into account), so reading from it gives a more
+        # faithful half-bend than the raw IK joint did.  weight=0.5
+        # produces the classic half-rotation; rotInterpolation=1
+        # (quaternion) avoids gimbal artefacts.  Translate of
+        # mid_leg_j_def is already driven by pointConstraint(mid_lock)
+        # earlier in create_roots; the rotate channel was deliberately
+        # left free for this driver.
+        knee_half_pb = cmds.createNode(
+            "pairBlend",
+            name=naming.parse(
+                [self.module_name, "knee", "halfRot"], suffix="pb"
+            ),
+        )
+        cmds.connectAttr(
+            "%s.rotate" % ribbon_lower_leg.start_aim,
+            "%s.inRotate1" % knee_half_pb,
+        )
+        cmds.setAttr("%s.weight" % knee_half_pb, 0.5)
+        cmds.setAttr("%s.rotInterpolation" % knee_half_pb, 1)
+        cmds.connectAttr(
+            "%s.outRotate" % knee_half_pb,
+            "%s.rotate" % self.mid_leg_j_def,
+        )
 
         # connect the midLeg scaling
         cmds.connectAttr(
