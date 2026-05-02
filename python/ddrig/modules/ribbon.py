@@ -1066,34 +1066,56 @@ class Guides(GuidesCore):
             joint.set_joint_type(jnt, "Ribbon")
 
     def define_attributes(self):
-        """Override the base behaviour to create every LIMB_DATA
-        property on EVERY guide joint, not just the root.
+        """Override the base behaviour to force-create every LIMB_DATA
+        property on EVERY guide joint -- including the root.
 
-        ``ddrig.base.initials`` walks every guide joint while building
-        ``build_data`` and queries each ``LIMB_DATA["properties"]``
-        attribute.  Ribbon's properties (jointRes / ctrlRes / ctrlSize
-        / uvDirection plus the four Phase 2 deformer counts) are only
-        meaningful on the root, but if they're missing on segment
-        guides Maya emits 'Attribute cannot find ribbon_N_jInit.<attr>'
-        warnings on every collection cycle.
+        ``ddrig.base.initials.Initials.get_property`` warns
+        ``"Attribute cannot find {jnt}.{attr}"`` whenever
+        ``cmds.getAttr`` raises ``ValueError``.  The UI's
+        ``_refresh_module_props`` queries every property listed in
+        ``LIMB_DATA["properties"]`` against the module root joint, so
+        any missing attribute on the root produces one warning per
+        selection.
 
-        ``GuidesCore.define_attributes`` (the parent) creates the
-        properties on ``self.guideJoints[0]`` only.  We call super
-        first, then redundantly fill the same properties on every
-        other guide joint, guarded by ``attributeQuery exists`` so the
-        operation is idempotent and the root keeps the canonical
-        values.  Functional behaviour is unchanged: the build class
-        still reads from ``self.inits[0]``."""
+        Two failure modes both lead to that warning:
+
+        1. **Stale guide**: the user built the ribbon guide chain in
+           an older session, before a property (e.g. the four Phase 2
+           ``*Count`` attrs) existed.  ``GuidesCore.define_attributes``
+           ran with the older ``LIMB_DATA`` and never created the new
+           properties on the root.
+        2. **Segment guides**: any code path that iterates every
+           guide joint (e.g. ``base/initials.py`` walks) finds segment
+           guides missing the properties even though the root has them.
+
+        Calling ``super`` first preserves base-class side-effects
+        (joint sides, global axis attrs, root property creation),
+        then we walk **every** guide joint -- root included -- and
+        back-fill any missing property.  The
+        ``attributeQuery exists`` guard makes the operation idempotent
+        on freshly-created guides; the ``try/except RuntimeError``
+        swallows the benign 'attribute already exists' that
+        ``addAttr`` raises if a name collision sneaks past the guard
+        (e.g. a parent class added a similarly-named attribute first).
+
+        Functional behaviour is unchanged: the build class still
+        reads from ``self.inits[0]``."""
         super(Guides, self).define_attributes()
-        if len(self.guideJoints) <= 1:
+        if not self.guideJoints:
             return
-        for jnt in self.guideJoints[1:]:
+        for jnt in self.guideJoints:
+            if not jnt or not cmds.objExists(jnt):
+                continue
             for attr_dict in self.limb_data["properties"]:
                 attr_name = attr_dict["attr_name"]
                 if cmds.attributeQuery(attr_name, node=jnt, exists=True):
                     continue
                 try:
                     attribute.create_attribute(jnt, attr_dict)
+                except RuntimeError:
+                    # Benign duplicate -- some attribute creation
+                    # paths race or normalise names; ignore.
+                    pass
                 except Exception as exc:   # noqa: BLE001
                     LOG.warning(
                         "ribbon Guides: failed creating %s on %s: %s"
