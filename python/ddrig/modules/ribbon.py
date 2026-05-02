@@ -187,16 +187,22 @@ class Ribbon(ModuleCore):
     def _build_surface(self):
         """Loft two offset curves running through the init positions to
         form a flat nurbsSurface that follows the chain.  The width
-        offset is along the module's ``mirror_axis`` so the surface
-        opens "sideways" in the correct direction for left / right
-        modules."""
+        offset is split symmetrically (+/- W/2) along the module's
+        ``mirror_axis`` so the init chain sits on the surface's
+        center line (U/V = 0.5).  Follicles default to parameter 0.5
+        too, which means bind joints land exactly on the guide chain
+        instead of being offset by a full +W on one side."""
         width = max(self.total_length * 0.05, 1.0)
+        half_width = width * 0.5
         mirror = om.MVector(self.mirror_axis).normal()
         if mirror.length() < 1e-6:
             mirror = om.MVector(1, 0, 0)
-        pts_a = [self._vec(p) for p in self.init_positions]
+        pts_a = [
+            self._vec(om.MVector(p) - mirror * half_width)
+            for p in self.init_positions
+        ]
         pts_b = [
-            self._vec(om.MVector(p) + mirror * width)
+            self._vec(om.MVector(p) + mirror * half_width)
             for p in self.init_positions
         ]
         # Curve degree 2 keeps the loft well-conditioned even when
