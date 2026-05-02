@@ -41,6 +41,7 @@ import maya.api.OpenMaya as om
 from ddrig.library import functions, joint
 from ddrig.library import naming
 from ddrig.library import api
+from ddrig.library import attribute
 from ddrig.objects.controller import Controller
 from ddrig.core.module import ModuleCore, GuidesCore
 
@@ -537,11 +538,85 @@ class Ribbon(ModuleCore):
         except RuntimeError as exc:
             LOG.warning("ribbon: surface skinCluster failed: %s" % exc)
 
-        # The first controller hosts Phase 2 deformer attrs.  Choosing
-        # the root-side ctrl keeps the attrs visible at the obvious
-        # place when an animator picks the rig up from the root.
-        if self.ctrl_objects:
-            self.main_ctrl = self.ctrl_objects[0].name
+        # If a dedicated module-level main controller has been created
+        # (see :meth:`_build_main_controller`), reparent every
+        # per-segment ctrl underneath it so the rig has a single
+        # selectable handle that drags the whole ribbon, mirroring
+        # tentacle's hierarchy.  We reparent the topmost OFFSET
+        # transform (not the controller itself) so the animator's
+        # transform channels stay clean.
+        if self.main_ctrl and cmds.objExists(self.main_ctrl):
+            for cont in self.ctrl_objects:
+                offsets = cont.get_offsets() or []
+                top = offsets[0] if offsets else cont.name
+                if not cmds.objExists(top):
+                    continue
+                current_parent = cmds.listRelatives(
+                    top, parent=True, fullPath=True
+                ) or []
+                cur_short = (
+                    current_parent[0].rsplit("|", 1)[-1]
+                    if current_parent else None
+                )
+                if cur_short == self.main_ctrl:
+                    continue
+                try:
+                    cmds.parent(top, self.main_ctrl)
+                except RuntimeError as exc:
+                    LOG.warning(
+                        "ribbon: reparenting %s under %s failed: %s"
+                        % (top, self.main_ctrl, exc)
+                    )
+
+    def _build_main_controller(self):
+        """Create the module-level main controller.
+
+        The main controller sits at the root guide's world position
+        and serves three purposes: (1) it's the parent of every
+        per-segment controller, so a single selection drags the whole
+        ribbon, (2) it's the host for the Phase 2 deformer attrs, and
+        (3) it gives the animator a clear handle to anchor / parent
+        the module to other rigs.
+
+        Mirrors tentacle's main-controller pattern: a Square shape,
+        scaled relative to chain length, side-coloured, registered
+        through the standard :attr:`controllers` list so DDRIG's
+        ModuleCore parents it under :attr:`controllerGrp` via the
+        usual pipeline."""
+        if self.main_ctrl and cmds.objExists(self.main_ctrl):
+            # Already created (e.g. caller stacked _build_main twice).
+            return
+        size = max(self.total_length * 0.18, 0.5) * self.ctrl_size
+        # Use look_axis as the controller's normal so the Square sits
+        # perpendicular to the chain (visually obvious).  Fall back to
+        # +Y for degenerate axis vectors.
+        look = om.MVector(self.look_axis)
+        if look.length() < 1e-6:
+            look = om.MVector(0, 1, 0)
+        look = look.normal()
+        main = Controller(
+            name=naming.parse(
+                [self.module_name, "main"], suffix="cont"
+            ),
+            shape="Square",
+            scale=(size, size, size),
+            normal=(look[0], look[1], look[2]),
+            side=self.side,
+            tier="primary",
+        )
+        # Snap to root world position; freeze so the controller's
+        # transform reads (0, 0, 0) at rest.
+        try:
+            cmds.xform(
+                main.name, worldSpace=True,
+                translation=self._vec(self.init_positions[0]),
+            )
+        except RuntimeError:
+            pass
+        main.add_offset("OFF")
+        main.freeze()
+        self.controllers.append(main)
+        self.main_ctrl = main.name
 
     # -- Phase 2: nonLinear deformers ---------------------------------
 
@@ -886,11 +961,16 @@ class Ribbon(ModuleCore):
         Phase-2 deformer integrations can substitute their own
         controller layout without re-running :meth:`create_joints`.
 
-        The Phase 2 nonLinear-deformer step runs at the end of this
-        method because it depends on ``main_ctrl`` (set inside
-        ``_build_controllers``).  When all four deformer counts on
-        the guide root are 0 the step returns immediately and Phase 1
-        behaviour is preserved."""
+        Order matters:
+          1. ``_build_main_controller`` -- creates the module-level
+             main controller and sets ``self.main_ctrl`` to it.
+          2. ``_build_controllers``      -- creates per-segment ctrls
+             and reparents them under main_ctrl at the end.
+          3. ``_build_deformers``        -- creates nonLinear deformers
+             whose attrs are hosted on main_ctrl.  No-op when every
+             deformer count is 0 (default), so Phase 1 behaviour is
+             preserved exactly."""
+        self._build_main_controller()
         self._build_controllers()
         self._build_deformers()
 
@@ -984,3 +1064,38 @@ class Guides(GuidesCore):
             joint.set_joint_type(self.guideJoints[-1], "RibbonEnd")
         for jnt in self.guideJoints[1:-1]:
             joint.set_joint_type(jnt, "Ribbon")
+
+    def define_attributes(self):
+        """Override the base behaviour to create every LIMB_DATA
+        property on EVERY guide joint, not just the root.
+
+        ``ddrig.base.initials`` walks every guide joint while building
+        ``build_data`` and queries each ``LIMB_DATA["properties"]``
+        attribute.  Ribbon's properties (jointRes / ctrlRes / ctrlSize
+        / uvDirection plus the four Phase 2 deformer counts) are only
+        meaningful on the root, but if they're missing on segment
+        guides Maya emits 'Attribute cannot find ribbon_N_jInit.<attr>'
+        warnings on every collection cycle.
+
+        ``GuidesCore.define_attributes`` (the parent) creates the
+        properties on ``self.guideJoints[0]`` only.  We call super
+        first, then redundantly fill the same properties on every
+        other guide joint, guarded by ``attributeQuery exists`` so the
+        operation is idempotent and the root keeps the canonical
+        values.  Functional behaviour is unchanged: the build class
+        still reads from ``self.inits[0]``."""
+        super(Guides, self).define_attributes()
+        if len(self.guideJoints) <= 1:
+            return
+        for jnt in self.guideJoints[1:]:
+            for attr_dict in self.limb_data["properties"]:
+                attr_name = attr_dict["attr_name"]
+                if cmds.attributeQuery(attr_name, node=jnt, exists=True):
+                    continue
+                try:
+                    attribute.create_attribute(jnt, attr_dict)
+                except Exception as exc:   # noqa: BLE001
+                    LOG.warning(
+                        "ribbon Guides: failed creating %s on %s: %s"
+                        % (attr_name, jnt, exc)
+                    )
