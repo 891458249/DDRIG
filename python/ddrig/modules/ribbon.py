@@ -121,6 +121,23 @@ LIMB_DATA = {
             "max_value": 5,
             "default_value": 0,
         },
+        # ---- Phase 2b: optional IK driving layer ----
+        # Adds a duplicate ``drive surface`` of the main ribbon, with
+        # ``ikCtrlCount`` cube-shaped IK controllers skinned to it.
+        # The drive surface's FK-position follicles reverse-drive the
+        # Phase 1 per-segment FK controllers via ``connectAttr``.
+        # ``0`` = IK layer disabled; Phase 1/2 behaviour preserved
+        # exactly.  Recommended range when enabled: 2-3 ctrls (start /
+        # mid / end).  Larger counts work but offer diminishing
+        # returns over the per-segment FK ctrls.
+        {
+            "attr_name": "ikCtrlCount",
+            "nice_name": "IK_Ctrl_Count",
+            "attr_type": "long",
+            "min_value": 0,
+            "max_value": 10,
+            "default_value": 0,
+        },
     ],
     "multi_guide": "Ribbon",
     "sided": True,
@@ -180,6 +197,8 @@ class Ribbon(ModuleCore):
         self.wave_count = self._read_count_attr("waveCount")
         self.bend_count = self._read_count_attr("bendCount")
         self.twist_count = self._read_count_attr("twistCount")
+        # Phase 2b IK driving layer count (0 = disabled).
+        self.ik_ctrl_count = self._read_count_attr("ikCtrlCount")
 
         # Standard DDRIG identity fields.
         self.side = joint.get_joint_side(self.inits[0])
@@ -212,6 +231,14 @@ class Ribbon(ModuleCore):
         # first entry in ``self.ctrl_objects``.
         self.main_ctrl = None
         self.deformer_grp = None
+        # Phase 2b IK layer state (filled by ``_build_ik_layer``).
+        self.drive_surface = None
+        self.drive_surface_shape = None
+        self.ik_controllers = []
+        self.ik_joints = []
+        self.drive_fk_follicles = []
+        self.drive_bind_follicles = []
+        self.drive_ik_follicles = []
 
     # -- helpers -------------------------------------------------------
 
@@ -937,6 +964,392 @@ class Ribbon(ModuleCore):
                 except RuntimeError:
                     pass
 
+    # -- Phase 2b: IK driving layer -----------------------------------
+
+    def _build_ik_layer(self):
+        """Optional IK driving layer over the Phase 1 ribbon.
+
+        Activates only when the guide root's ``ikCtrlCount`` attr is
+        > 0.  Mirrors the user's ``ribbon_rig_tool_freelancer3.2``
+        ``ribbonForIK`` + ``createCtrlForIK`` + ``skinningRibbon``
+        pipeline (line 495-773), adapted to DDRIG conventions:
+
+            1. Duplicate the main ribbon into a hidden ``drive
+               surface``.
+            2. Create three follicle sets on the drive surface:
+                  bind  (count = jointRes)
+                  fk    (count = ctrl_res)
+                  ik    (count = ik_ctrl_count)
+               The bind set is structural padding so the drive surface
+               keeps the same vertex semantics as the main ribbon; the
+               fk set reverse-drives Phase 1 controllers; the ik set
+               positions the IK controllers.
+            3. Cube-shaped IK controllers at ik-follicle positions,
+               each with a hidden child IK joint that is skinned to
+               the drive surface.
+            4. Skin drive_surface to IK joints via the source tool's
+               temp-poly weight transfer (gives clean,
+               IK-count-aware falloff).
+            5. ``connectAttr`` drive_fk_follicle.translate / .rotate
+               to each Phase 1 per-segment controller's topmost OFFSET
+               (the parent group already living under main_ctrl).  The
+               offset receives the IK output; the controller itself
+               keeps its own translate / rotate channels for the
+               animator to add additive pose.
+
+        When ``ik_ctrl_count <= 0`` this method returns immediately
+        and Phase 1 / Phase 2 behaviour is preserved exactly."""
+        if self.ik_ctrl_count <= 0:
+            return
+        if not self.surface or not cmds.objExists(self.surface):
+            LOG.warning(
+                "ribbon: cannot find Phase 1 surface, skipping IK layer"
+            )
+            return
+        if not self.main_ctrl or not cmds.objExists(self.main_ctrl):
+            LOG.warning(
+                "ribbon: no main_ctrl, skipping IK layer"
+            )
+            return
+
+        drive = self._build_drive_surface()
+        self.drive_bind_follicles = self._build_drive_follicles(
+            drive, count=self.joint_res, suffix="bindPos"
+        )
+        self.drive_fk_follicles = self._build_drive_follicles(
+            drive, count=self.ctrl_res, suffix="fkPos"
+        )
+        self.drive_ik_follicles = self._build_drive_follicles(
+            drive, count=self.ik_ctrl_count, suffix="ikPos"
+        )
+
+        self._build_ik_controllers(self.drive_ik_follicles)
+        self._skin_drive_surface(drive, self.ik_joints)
+        self._connect_drive_to_main_fk(self.drive_fk_follicles)
+
+        # Hide the drive surface -- it's pure rigging plumbing, the
+        # animator should not see or select it.
+        try:
+            cmds.setAttr("%s.visibility" % drive, 0)
+        except RuntimeError:
+            pass
+
+    def _build_drive_surface(self):
+        """Duplicate Phase 1's main surface into a hidden drive
+        surface parented under ``nonScaleGrp``."""
+        drive = cmds.duplicate(
+            self.surface,
+            name=naming.parse(
+                [self.module_name, "drive"], suffix="nSurf"
+            ),
+        )[0]
+        # ``duplicate`` may return a child-of-original; re-parent to
+        # world first so the subsequent reparent under nonScaleGrp is
+        # unambiguous.
+        try:
+            current_parent = cmds.listRelatives(
+                drive, parent=True, fullPath=True
+            ) or []
+            if current_parent:
+                drive = cmds.parent(drive, world=True)[0]
+        except RuntimeError:
+            pass
+        cmds.parent(drive, self.nonScaleGrp)
+        self.drive_surface = drive
+        shapes = functions.get_shapes(drive) or []
+        self.drive_surface_shape = shapes[0] if shapes else None
+        return drive
+
+    def _build_drive_follicles(self, drive_surface, count, suffix):
+        """Create ``count`` follicles on ``drive_surface`` evenly
+        spaced along the resolved long axis.  Returns the list of
+        follicle transform short names; the follicles are parented
+        under a per-suffix group beneath ``nonScaleGrp``."""
+        if count <= 0:
+            return []
+        drive_shape = self.drive_surface_shape
+        if not drive_shape or not cmds.objExists(drive_shape):
+            shapes = functions.get_shapes(drive_surface) or []
+            drive_shape = shapes[0] if shapes else None
+        if not drive_shape:
+            LOG.warning(
+                "ribbon: drive surface has no shape, skipping %s follicles"
+                % suffix
+            )
+            return []
+
+        follicles = []
+        for i in range(count):
+            param = float(i) / float(count - 1) if count > 1 else 0.5
+            folli_shape = cmds.createNode(
+                "follicle",
+                name=naming.parse(
+                    [self.module_name, "drive", suffix, i],
+                    suffix="folliShape",
+                ),
+            )
+            folli_xf = cmds.listRelatives(folli_shape, parent=True)[0]
+            folli_xf = cmds.rename(
+                folli_xf,
+                naming.parse(
+                    [self.module_name, "drive", suffix, i],
+                    suffix="folli",
+                ),
+            )
+            folli_shape = cmds.listRelatives(
+                folli_xf, shapes=True, type="follicle"
+            )[0]
+            cmds.connectAttr(
+                "%s.local" % drive_shape,
+                "%s.inputSurface" % folli_shape,
+                force=True,
+            )
+            cmds.connectAttr(
+                "%s.worldMatrix[0]" % drive_shape,
+                "%s.inputWorldMatrix" % folli_shape,
+                force=True,
+            )
+            cmds.connectAttr(
+                "%s.outTranslate" % folli_shape,
+                "%s.translate" % folli_xf,
+                force=True,
+            )
+            cmds.connectAttr(
+                "%s.outRotate" % folli_shape,
+                "%s.rotate" % folli_xf,
+                force=True,
+            )
+            if self.uv_dir_resolved == 1:
+                cmds.setAttr("%s.parameterU" % folli_shape, 0.5)
+                cmds.setAttr("%s.parameterV" % folli_shape, param)
+            else:
+                cmds.setAttr("%s.parameterV" % folli_shape, 0.5)
+                cmds.setAttr("%s.parameterU" % folli_shape, param)
+            follicles.append(folli_xf)
+
+        # Group + parent under nonScaleGrp so the follicles don't
+        # clutter the rig root.
+        grp = cmds.group(
+            empty=True,
+            name=naming.parse(
+                [self.module_name, "drive", suffix], suffix="grp"
+            ),
+        )
+        for f in follicles:
+            cmds.parent(f, grp)
+        cmds.parent(grp, self.nonScaleGrp)
+        return follicles
+
+    def _build_ik_controllers(self, drive_ik_follicles):
+        """Create one Cube-shape IK controller per ``drive_ik_follicle``.
+        Each controller hosts a hidden child joint that participates
+        in the drive-surface skin.  Controllers are parented under
+        ``main_ctrl`` and registered in ``self.controllers`` so the
+        DDRIG pipeline picks them up."""
+        size = max(self.total_length * 0.1, 0.5) * self.ctrl_size
+        # Aim the cube along the chain by feeding ``look_axis`` as
+        # the controller's normal.  Fall back to +Y for degenerate
+        # axis vectors.
+        look = om.MVector(self.look_axis)
+        if look.length() < 1e-6:
+            look = om.MVector(0, 1, 0)
+        look = look.normal()
+        for i, folli in enumerate(drive_ik_follicles, start=1):
+            try:
+                pos = cmds.xform(
+                    folli, query=True, worldSpace=True, translation=True
+                )
+                rot = cmds.xform(
+                    folli, query=True, worldSpace=True, rotation=True
+                )
+            except RuntimeError:
+                pos = self._vec(self.init_positions[0])
+                rot = (0.0, 0.0, 0.0)
+
+            cont = Controller(
+                name=naming.parse(
+                    [self.module_name, "IK", i], suffix="cont"
+                ),
+                shape="Cube",
+                scale=(size, size, size),
+                normal=(look[0], look[1], look[2]),
+                side=self.side,
+                tier="primary",
+            )
+            try:
+                cmds.xform(
+                    cont.name, worldSpace=True, translation=pos, rotation=rot
+                )
+            except RuntimeError:
+                pass
+            cont.add_offset("OFF")
+            cont.freeze()
+
+            # Hidden IK joint at controller position; this is what
+            # ``_skin_drive_surface`` binds to.  Parenting it under
+            # the controller means controller motion drives the
+            # joint; freezing rotate keeps the joint orient clean.
+            cmds.select(clear=True)
+            ik_jnt = cmds.joint(
+                name=naming.parse(
+                    [self.module_name, "IK", i], suffix="jnt"
+                ),
+                position=pos,
+                radius=1.0,
+            )
+            try:
+                cmds.parent(ik_jnt, cont.name)
+            except RuntimeError:
+                pass
+            try:
+                cmds.makeIdentity(ik_jnt, apply=True, rotate=True)
+            except RuntimeError:
+                pass
+            try:
+                cmds.setAttr("%s.visibility" % ik_jnt, 0)
+            except RuntimeError:
+                pass
+
+            # Reparent the topmost offset under main_ctrl so the IK
+            # controllers are children of the rig's main handle.
+            offsets = cont.get_offsets() or []
+            top = offsets[0] if offsets else cont.name
+            try:
+                if cmds.objExists(self.main_ctrl):
+                    cmds.parent(top, self.main_ctrl)
+            except RuntimeError as exc:
+                LOG.warning(
+                    "ribbon IK: parenting %s under %s failed: %s"
+                    % (top, self.main_ctrl, exc)
+                )
+
+            self.controllers.append(cont)
+            self.ik_controllers.append(cont.name)
+            self.ik_joints.append(ik_jnt)
+
+    def _skin_drive_surface(self, drive_surface, ik_joints):
+        """Skin ``drive_surface`` to ``ik_joints`` using the source
+        tool's temp-poly weight transfer recipe (line 757-770 of
+        ``ribbon_rig_tool_freelancer3.2``).  The poly proxy's
+        IK-count-aligned U-spans give predictable, smooth weights
+        that we then ``copySkinWeights`` onto the actual NURBS."""
+        if not ik_joints:
+            return
+        try:
+            cmds.makeIdentity(ik_joints, apply=True, rotate=True)
+        except RuntimeError:
+            pass
+        temp_nurbs = cmds.duplicate(
+            drive_surface,
+            name=naming.parse(
+                [self.module_name, "drive", "tempSkin"], suffix="nSurf"
+            ),
+        )[0]
+        try:
+            cmds.rebuildSurface(
+                temp_nurbs,
+                ch=False, replaceOriginal=True, endKnots=True,
+                keepRange=False, keepCorners=False,
+                keepControlPoints=False,
+                spansU=max(len(ik_joints) - 1, 1), degreeU=3,
+                spansV=0, degreeV=3,
+                tolerance=0, fitRebuild=False, direction=2,
+            )
+        except RuntimeError as exc:
+            LOG.warning(
+                "ribbon IK: rebuildSurface temp_nurbs failed: %s" % exc
+            )
+        try:
+            temp_poly_result = cmds.nurbsToPoly(temp_nurbs, ch=True)
+            temp_poly = temp_poly_result[0]
+            cmds.setAttr("%s.format" % temp_poly_result[1], 3)
+            cmds.delete(temp_poly, constructionHistory=True)
+        except RuntimeError as exc:
+            LOG.warning(
+                "ribbon IK: nurbsToPoly failed: %s" % exc
+            )
+            try:
+                cmds.delete(temp_nurbs)
+            except RuntimeError:
+                pass
+            return
+
+        try:
+            temp_skin = cmds.skinCluster(
+                ik_joints, temp_poly,
+                toSelectedBones=True, maximumInfluences=3,
+            )[0]
+            drive_skin = cmds.skinCluster(
+                ik_joints, drive_surface,
+                toSelectedBones=True, smoothWeights=0.5,
+                name=naming.parse(
+                    [self.module_name, "drive"], suffix="skin"
+                ),
+            )[0]
+            cmds.copySkinWeights(
+                sourceSkin=temp_skin, destinationSkin=drive_skin,
+                noMirror=True,
+                surfaceAssociation="closestPoint",
+                influenceAssociation="closestJoint",
+            )
+        except RuntimeError as exc:
+            LOG.warning(
+                "ribbon IK: drive surface skinCluster failed: %s" % exc
+            )
+        finally:
+            try:
+                cmds.delete(temp_nurbs)
+            except RuntimeError:
+                pass
+            try:
+                cmds.delete(temp_poly)
+            except RuntimeError:
+                pass
+
+    def _connect_drive_to_main_fk(self, drive_fk_follicles):
+        """Reverse-drive each Phase 1 per-segment controller from the
+        matching drive-surface FK follicle.  We connect to the
+        controller's topmost OFFSET (already living under main_ctrl
+        thanks to the Phase 3 reparent) so the controller's own
+        ``translate`` / ``rotate`` channels stay free for the
+        animator to layer additive pose on top of the IK output.
+
+        Counts must match (both are ``ctrl_res``).  If they don't
+        we log a warning and bail without partial wiring."""
+        if not drive_fk_follicles:
+            return
+        if len(drive_fk_follicles) != len(self.ctrl_objects):
+            LOG.warning(
+                "ribbon IK: drive fk follicle count (%d) != Phase 1 "
+                "ctrl count (%d); skipping connection"
+                % (len(drive_fk_follicles), len(self.ctrl_objects))
+            )
+            return
+        for folli, cont in zip(drive_fk_follicles, self.ctrl_objects):
+            offsets = cont.get_offsets() or []
+            target = offsets[0] if offsets else cont.name
+            if not cmds.objExists(target):
+                continue
+            for ch in ("translate", "rotate"):
+                src = "%s.%s" % (folli, ch)
+                dst = "%s.%s" % (target, ch)
+                # Defensive: drop any prior driver on the offset's
+                # channel before our follicle takes over.
+                for prior in (cmds.listConnections(
+                        dst, source=True, destination=False, plugs=True
+                ) or []):
+                    try:
+                        cmds.disconnectAttr(prior, dst)
+                    except RuntimeError:
+                        pass
+                try:
+                    cmds.connectAttr(src, dst, force=True)
+                except RuntimeError as exc:
+                    LOG.warning(
+                        "ribbon IK: connectAttr %s -> %s failed: %s"
+                        % (src, dst, exc)
+                    )
+
     # -- pipeline ------------------------------------------------------
 
     def create_joints(self):
@@ -966,13 +1379,18 @@ class Ribbon(ModuleCore):
              main controller and sets ``self.main_ctrl`` to it.
           2. ``_build_controllers``      -- creates per-segment ctrls
              and reparents them under main_ctrl at the end.
-          3. ``_build_deformers``        -- creates nonLinear deformers
-             whose attrs are hosted on main_ctrl.  No-op when every
-             deformer count is 0 (default), so Phase 1 behaviour is
-             preserved exactly."""
+          3. ``_build_deformers``        -- Phase 2 nonLinear
+             deformers; attrs on main_ctrl.  No-op when all four
+             counts are 0.
+          4. ``_build_ik_layer``         -- Phase 2b optional IK
+             driving layer.  No-op when ``ikCtrlCount`` is 0;
+             otherwise builds a hidden drive surface, IK
+             controllers, and connectAttr bridges that
+             reverse-drive the per-segment FK ctrls."""
         self._build_main_controller()
         self._build_controllers()
         self._build_deformers()
+        self._build_ik_layer()
 
     def round_up(self):
         """Final wiring: scale-follow the rig root, hide rig-internal
