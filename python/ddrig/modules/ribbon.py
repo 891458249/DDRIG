@@ -1306,16 +1306,92 @@ class Ribbon(ModuleCore):
             except RuntimeError:
                 pass
 
+    def _wrap_ctrl_with_zero(self, ctrl):
+        """Insert a dedicated empty 'zero buffer' group as the parent
+        of ``ctrl`` and return it.  The zero buffer matches the
+        controller's current world transform so re-parenting does not
+        move the controller visually; the controller's local
+        ``translate`` / ``rotate`` channels stay free for the animator
+        to layer additive pose on top of whatever drives the zero.
+
+        The zero buffer is named ``{ctrl}_drive_zero`` and is
+        idempotent: if ``ctrl`` is already parented under a buffer
+        with that name (re-build / repeated invocation), the existing
+        buffer is returned unchanged.  This is the right level to
+        connect drive-surface follicle output into -- connecting
+        directly to the controller's transform clobbers the animator's
+        pose, and connecting to a higher ancestor (e.g. the module's
+        ``scale_grp``) creates a cycle through the rig's
+        parent/scaleConstraint scaffolding.
+        """
+        existing = cmds.listRelatives(ctrl, parent=True, fullPath=True) or []
+        if existing:
+            short = existing[0].rsplit("|", 1)[-1]
+            if short.endswith("_drive_zero"):
+                return short
+
+        ctrl_short = ctrl.rsplit("|", 1)[-1]
+        try:
+            world_t = cmds.xform(
+                ctrl, query=True, worldSpace=True, translation=True
+            )
+            world_r = cmds.xform(
+                ctrl, query=True, worldSpace=True, rotation=True
+            )
+        except RuntimeError:
+            world_t = None
+            world_r = None
+
+        zero_name = "%s_drive_zero" % ctrl_short
+        zero = cmds.group(empty=True, name=zero_name)
+        if world_t is not None:
+            try:
+                cmds.xform(zero, worldSpace=True, translation=world_t)
+            except RuntimeError:
+                pass
+        if world_r is not None:
+            try:
+                cmds.xform(zero, worldSpace=True, rotation=world_r)
+            except RuntimeError:
+                pass
+
+        # Preserve the controller's previous parent (typically the
+        # topmost OFFSET that already lives under main_ctrl).  If
+        # ``ctrl`` was at world root, leave the zero at world root.
+        if existing:
+            try:
+                cmds.parent(zero, existing[0])
+            except RuntimeError as exc:
+                LOG.warning(
+                    "ribbon IK: parenting zero buffer %s under %s "
+                    "failed: %s" % (zero, existing[0], exc)
+                )
+
+        try:
+            cmds.parent(ctrl, zero)
+        except RuntimeError as exc:
+            LOG.warning(
+                "ribbon IK: parenting %s under zero buffer %s "
+                "failed: %s" % (ctrl, zero, exc)
+            )
+        return zero
+
     def _connect_drive_to_main_fk(self, drive_fk_follicles):
         """Reverse-drive each Phase 1 per-segment controller from the
-        matching drive-surface FK follicle.  We connect to the
-        controller's topmost OFFSET (already living under main_ctrl
-        thanks to the Phase 3 reparent) so the controller's own
-        ``translate`` / ``rotate`` channels stay free for the
-        animator to layer additive pose on top of the IK output.
+        matching drive-surface FK follicle.
 
-        Counts must match (both are ``ctrl_res``).  If they don't
-        we log a warning and bail without partial wiring."""
+        Each controller is wrapped in a dedicated ``_drive_zero``
+        buffer (see :meth:`_wrap_ctrl_with_zero`) and the drive
+        follicle's ``translate`` / ``rotate`` connect to that buffer's
+        channels -- never to the controller itself (would clobber
+        animator pose) and never to an ancestor like the module's
+        ``scale_grp`` (the previous parent fallback caused
+        ``Cycle on ribbon_scale_grp_parentConstraint1.target[0].
+        targetParentMatrix`` warnings because scale_grp is wired into
+        the rig's global parent / scale constraints).
+
+        Counts must match (both are ``ctrl_res``).  If they don't we
+        log a warning and bail without partial wiring."""
         if not drive_fk_follicles:
             return
         if len(drive_fk_follicles) != len(self.ctrl_objects):
@@ -1326,15 +1402,17 @@ class Ribbon(ModuleCore):
             )
             return
         for folli, cont in zip(drive_fk_follicles, self.ctrl_objects):
-            offsets = cont.get_offsets() or []
-            target = offsets[0] if offsets else cont.name
-            if not cmds.objExists(target):
+            ctrl_name = cont.name
+            if not cmds.objExists(ctrl_name):
+                continue
+            zero = self._wrap_ctrl_with_zero(ctrl_name)
+            if not zero or not cmds.objExists(zero):
                 continue
             for ch in ("translate", "rotate"):
                 src = "%s.%s" % (folli, ch)
-                dst = "%s.%s" % (target, ch)
-                # Defensive: drop any prior driver on the offset's
-                # channel before our follicle takes over.
+                dst = "%s.%s" % (zero, ch)
+                # Defensive: drop any prior driver before our
+                # follicle takes over (handles the re-build case).
                 for prior in (cmds.listConnections(
                         dst, source=True, destination=False, plugs=True
                 ) or []):
