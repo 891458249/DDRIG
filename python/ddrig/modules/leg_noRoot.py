@@ -1103,6 +1103,34 @@ class LegNoRoot(ModuleCore):
             "%s.outRotate" % knee_half_pb,
             "%s.rotate" % self.mid_leg_j_def,
         )
+        # Full-rotation driver for hip_jDef.  Same pairBlend pattern as
+        # the knee but weight 1.0 -- hip is the module root, fully
+        # follows the IK-resolved root joint rotation.
+        hip_full_pb = cmds.createNode(
+            "pairBlend",
+            name=naming.parse(
+                [self.module_name, "hip", "rot"], suffix="pb"
+            ),
+        )
+        cmds.connectAttr(
+            "%s.rotate" % self.ik_orig_root_j,
+            "%s.inRotate1" % hip_full_pb,
+        )
+        cmds.setAttr("%s.weight" % hip_full_pb, 1.0)
+        cmds.setAttr("%s.rotInterpolation" % hip_full_pb, 1)
+        # Defensive: drop any prior incoming connections on hip_j_def's
+        # rotate channel before our own connection takes over.
+        for _src in (cmds.listConnections(
+                "%s.rotate" % self.hip_j_def,
+                source=True, destination=False, plugs=True) or []):
+            try:
+                cmds.disconnectAttr(_src, "%s.rotate" % self.hip_j_def)
+            except RuntimeError:
+                pass
+        cmds.connectAttr(
+            "%s.outRotate" % hip_full_pb,
+            "%s.rotate" % self.hip_j_def,
+        )
         cmds.parentConstraint(
             self.cont_mid_lock.name, self.mid_lock, maintainOffset=False
         )
