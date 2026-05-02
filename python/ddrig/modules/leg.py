@@ -1027,19 +1027,7 @@ class Leg(ModuleCore):
         self.mid_lock = cmds.spaceLocator(
             name=naming.parse([self.module_name, "midLock"], suffix="loc")
         )[0]
-        # mid_leg_j_def takes its TRANSLATE from mid_lock only; the
-        # ROTATE channel is driven directly by the half-rotation chain
-        # set up in ``ik_fk_switching`` (see the ``mid_lock_x_bln`` block
-        # below).  Routing rotate through the full
-        # mid_lock_x_bln -> cont_mid_lock_ave -> cont_mid_lock ->
-        # mid_lock -> mid_leg_j_def DAG chain works for the canonical
-        # leg in isolation but is fragile -- any DAG variation in a
-        # derived module (leg_noRoot, etc.) can silently zero out the
-        # propagated rotation.  The direct ``connectAttr`` on
-        # mid_leg_j_def.rotateZ bypasses every link of that chain and
-        # mirrors the spirit of arm.elbow_jDef's direct
-        # decomposeMatrix-based driver.
-        cmds.pointConstraint(self.mid_lock, self.mid_leg_j_def)
+        cmds.parentConstraint(self.mid_lock, self.mid_leg_j_def)
         cmds.parentConstraint(
             self.cont_mid_lock.name, self.mid_lock, maintainOffset=False
         )
@@ -1937,19 +1925,6 @@ class Leg(ModuleCore):
 
         cmds.connectAttr(
             "%s.outputZ" % mid_lock_x_bln, "%s.rotateZ" % self.cont_mid_lock_ave
-        )
-        # ALSO drive mid_leg_j_def's rotateZ directly from the half-
-        # rotation source.  cont_mid_lock_ave.rotateZ above remains so
-        # the controller's visual indicator still rotates with the
-        # bend; this extra connection short-circuits the long DAG path
-        # (cont_mid_lock_ave -> cont_mid_lock -> mid_lock ->
-        # mid_leg_j_def) that previously relied on parentConstraint
-        # rotation propagation.  Combined with the create_roots change
-        # of that parentConstraint to a pointConstraint, knee_jDef now
-        # reliably rotates by half the IK knee bend regardless of any
-        # DAG quirks in subclassed modules (leg_noRoot, etc.).
-        cmds.connectAttr(
-            "%s.outputZ" % mid_lock_x_bln, "%s.rotateZ" % self.mid_leg_j_def
         )
 
         end_lock_weight = cmds.pointConstraint(
