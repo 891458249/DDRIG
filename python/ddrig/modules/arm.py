@@ -393,40 +393,6 @@ class Arm(ModuleCore):
         for jnt in [self.j_collar_end, self.j_def_hand]:
             cmds.connectAttr("%s.s" % self.scaleHook, "%s.s" % jnt)
 
-        # Full-rotation driver for j_collar_end.  Same pairBlend pattern
-        # as leg's hip_jDef driver (commit 814d020 introduced the
-        # half-rotation knee variant; this is the weight=1.0 sibling).
-        # j_collar_end is the IK-helper at shoulder position; without a
-        # direct rotation driver it relied on DAG inheritance from
-        # j_def_collar, which was inconsistent across builds.  Reading
-        # j_def_collar.rotate at weight 1.0 makes j_collar_end fully
-        # follow the collar segment's local rotation.
-        collarEnd_full_pb = cmds.createNode(
-            "pairBlend",
-            name=naming.parse(
-                [self.module_name, "collarEnd", "rot"], suffix="pb"
-            ),
-        )
-        cmds.connectAttr(
-            "%s.rotate" % self.j_def_collar,
-            "%s.inRotate1" % collarEnd_full_pb,
-        )
-        cmds.setAttr("%s.weight" % collarEnd_full_pb, 1.0)
-        cmds.setAttr("%s.rotInterpolation" % collarEnd_full_pb, 1)
-        # Defensive: clear any prior incoming rotate connections on
-        # j_collar_end before our own takes over.
-        for _src in (cmds.listConnections(
-                "%s.rotate" % self.j_collar_end,
-                source=True, destination=False, plugs=True) or []):
-            try:
-                cmds.disconnectAttr(_src, "%s.rotate" % self.j_collar_end)
-            except RuntimeError:
-                pass
-        cmds.connectAttr(
-            "%s.outRotate" % collarEnd_full_pb,
-            "%s.rotate" % self.j_collar_end,
-        )
-
     def create_controllers(self):
         # shoulder controller
         shoulder_cont_scale = (
