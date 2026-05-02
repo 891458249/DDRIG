@@ -15,12 +15,12 @@ LOG = filelog.Filelog(logname=__name__, filename="ddrig_log")
 
 LIMB_DATA = {
     "members": [
-        # leg_noRoot omits LegRoot; Hip is the module root.  We tag it
-        # with a module-unique joint type label "LegNoRootHip" so it
-        # cannot be confused with the regular ``leg`` module's
-        # second-position "Hip" guide -- otherwise joint.identify
-        # would treat every leg's hip child as a leg_noRoot root and
-        # break the regular leg pipeline.
+        # leg_noRoot omits the LegRoot guide.  The deform / IK chain
+        # that requires a "leg_root" anchor as a DAG ancestor of hip
+        # is recreated INSIDE create_joints with a hidden anchor joint
+        # (see ``self.leg_root_j_def`` assignment there) -- no LegRoot
+        # exposed to the user, but the rig graph stays identical to
+        # ``leg`` in every way that matters for animation.
         "LegNoRootHip",
         "Knee",
         "Foot",
@@ -38,21 +38,31 @@ LIMB_DATA = {
 
 class LegNoRoot(ModuleCore):
     """Variant of :class:`ddrig.modules.leg.Leg` whose guide chain
-    drops the LegRoot guide; Hip takes over LegRoot's role of being
-    inits[0], the moduleName / side / useRefOri data source, the
-    spatial pivot anchor for the thigh controller, and the module's
-    top-level deform joint.
+    omits the LegRoot guide joint.  Hip is the module's root guide.
 
-    All downstream code can keep referring to ``self.leg_root_ref`` /
-    ``self.leg_root_j_def`` / ``self.leg_root_pos`` because those
-    fields are set up as aliases for the corresponding ``hip_*``
-    fields in this subclass."""
+    The internal rig graph is **the same as leg's** -- a hidden
+    ``{module}_anchor_j`` joint is created in :meth:`create_joints`
+    to play the structural role that ``_legRoot_jDef`` played in
+    leg.py: parent of ``hip_j_def`` in the DAG, child of
+    ``pacon_locator_hip`` after IK setup.  The downstream IK -> mid_lock
+    -> ``mid_leg_j_def`` (= ``_knee_jDef``) bend-bisecting chain depends
+    on this DAG ancestry, so we cannot remove the joint outright -- only
+    rename + hide it.
+
+    The anchor's name is ``{module}_anchor_j`` (suffix ``_j``, NOT
+    ``_jDef``); UE Skeleton's strict ``_dag_scan_deforms`` filters out
+    every ``_j`` that isn't the exact ``{module}_j`` base singleton, so
+    the anchor never leaks into the export skeleton."""
+
     name = "LegNoRoot"
     def __init__(self, build_data=None, inits=None):
         super(LegNoRoot, self).__init__()
         if build_data:
-            # Note the module-unique label "LegNoRootHip" -- see the
-            # comment on LIMB_DATA above for why we don't use bare "Hip".
+            # leg_noRoot: LegRoot is gone.  Hip is the data source for
+            # moduleName / side / useRefOri / etc; the ``leg_root_ref``
+            # field is kept as an alias so the rest of the (copied
+            # verbatim from leg.py) implementation reads the right
+            # attributes off the right joint.
             self.hip_ref = build_data["LegNoRootHip"]
             self.knee_ref = build_data["Knee"]
             self.foot_ref = build_data["Foot"]
@@ -61,11 +71,6 @@ class LegNoRoot(ModuleCore):
             self.toe_pv_ref = build_data["ToePV"]
             self.bank_in_ref = build_data["BankIN"]
             self.bank_out_ref = build_data["BankOUT"]
-            # leg_noRoot: hip is the module root -- alias the
-            # ``leg_root_ref`` field for the read-only references that
-            # remain (positional alignment, side / moduleName / axis
-            # attribute lookups).  We do NOT alias ``leg_root_j_def``
-            # the same way; see ``create_joints`` for why.
             self.leg_root_ref = self.hip_ref
             self.inits = [
                 self.hip_ref,
@@ -89,16 +94,16 @@ class LegNoRoot(ModuleCore):
             self.toe_pv_ref = inits[5]
             self.bank_in_ref = inits[6]
             self.bank_out_ref = inits[7]
-            # leg_noRoot: hip is the module root.  Alias so the
-            # read-only references to leg_root_ref keep working.
             self.leg_root_ref = self.hip_ref
             self.inits = inits
         else:
             LOG.error("Class needs either build_data or arm inits to be constructed")
 
-        # get positions
-        self.leg_root_pos = api.get_world_translation(self.leg_root_ref)
+        # get positions -- leg_root_pos is aliased to hip_pos so the
+        # rest of the file (copied verbatim from leg.py) sees a valid
+        # world position at every reference.
         self.hip_pos = api.get_world_translation(self.hip_ref)
+        self.leg_root_pos = self.hip_pos
         self.knee_pos = api.get_world_translation(self.knee_ref)
         self.foot_pos = api.get_world_translation(self.foot_ref)
         self.ball_pos = api.get_world_translation(self.ball_ref)
@@ -202,34 +207,48 @@ class LegNoRoot(ModuleCore):
             radius=3,
         )
 
-        # leg_noRoot: skip legRoot_jDef.  Hip is the module root deform
-        # joint and becomes the direct child of limbPlug.
+        # leg_noRoot: hidden anchor joint replaces the public
+        # ``_legRoot_jDef`` of leg.py.  Same DAG role (parent of hip,
+        # later child of pacon_locator_hip), so the IK / mid_lock /
+        # ribbon chain that drives knee_jDef bend-bisecting still
+        # works.  Naming intentionally uses the ``_j`` suffix (not
+        # ``_jDef``) so it is never picked up as a deform joint:
+        #   * skinCluster / def_jointsSet won't enrol it
+        #   * UE Skeleton's _dag_scan_deforms strict policy only
+        #     accepts ``_j`` joints whose short name equals
+        #     ``{module_name}_j``; ``{module_name}_anchor_j`` does
+        #     not match, so it never leaks into the export skeleton
+        # visibility=0 hides it from the user; the DAG hierarchy
+        # underneath (hip / knee / ...) inherits visibility from
+        # higher up so the visible rig is unaffected.
+        self.leg_root_j_def = cmds.joint(
+            name=naming.parse([self.module_name, "anchor"], suffix="j"),
+            position=self.leg_root_pos,
+            radius=0.1,
+        )
+        try:
+            cmds.setAttr("%s.visibility" % self.leg_root_j_def, 0)
+        except RuntimeError:
+            pass
+        self.sockets.append(self.leg_root_j_def)
         self.hip_j_def = cmds.joint(
             name=naming.parse([self.module_name, "hip"], suffix="jDef"),
             position=self.hip_pos,
             radius=1.5,
         )
         self.sockets.append(self.hip_j_def)
-        # IMPORTANT: leg_root_j_def is NOT aliased to hip_j_def.  The
-        # earlier alias caused the call at the bottom of
-        # create_ik_setup -- ``cmds.parent(self.leg_root_j_def,
-        # pacon_locator_hip)`` -- to drag hip_j_def out of limbPlug's
-        # subtree and into pacon_locator_hip's subtree, which broke
-        # the IK -> mid_lock -> knee_jDef rotation chain in subtle
-        # ways.  Instead we leave the field as None and route the
-        # three remaining call sites explicitly to hip_j_def below
-        # (positional alignments) or replace them with a constraint
-        # (the suspect reparent), preserving hip's original DAG
-        # location under limbPlug.
-        self.leg_root_j_def = None
 
         if not self.useRefOrientation:
             joint.orient_joints(
-                [self.hip_j_def],
+                [self.leg_root_j_def, self.hip_j_def],
                 world_up_axis=om.MVector(self.mirror_axis),
                 reverse_aim=self.sideMult,
             )
         else:
+            functions.align_to(
+                self.leg_root_j_def, self.leg_root_ref, position=True, rotation=True
+            )
+            cmds.makeIdentity(self.leg_root_j_def, apply=True)
             functions.align_to(
                 self.hip_j_def, self.hip_ref, position=True, rotation=True
             )
@@ -508,8 +527,10 @@ class LegNoRoot(ModuleCore):
         cmds.parent(self.fk_root_j, self.scaleGrp)
         cmds.parent(self.foot_j_def, self.scaleGrp)
 
-        # leg_noRoot: leg_root_j_def is an alias of hip_j_def, so we
-        # do not list both (would register the same joint twice).
+        # leg_noRoot: anchor (self.leg_root_j_def) is intentionally NOT
+        # added to deformerJoints -- it is a hidden structural joint,
+        # not a real deform joint, and must not appear in
+        # ``def_jointsSet_*`` or skinCluster influence pickers.
         self.deformerJoints += [
             self.mid_leg_j_def,
             self.hip_j_def,
@@ -1796,7 +1817,7 @@ class LegNoRoot(ModuleCore):
             name=naming.parse([self.module_name, "pacon"], suffix="loc")
         )[0]
         functions.align_to(
-            pacon_locator_hip, self.hip_j_def, position=True, rotation=True
+            pacon_locator_hip, self.leg_root_j_def, position=True, rotation=True
         )
         #
         _pa_con_j_def = cmds.parentConstraint(
@@ -1810,18 +1831,7 @@ class LegNoRoot(ModuleCore):
         cmds.parent(self.end_lock_ore, self.scaleGrp)
 
         cmds.parent(pacon_locator_hip, self.scaleGrp)
-        # leg.py here did ``cmds.parent(self.leg_root_j_def,
-        # pacon_locator_hip)`` to reparent the legRoot subtree under
-        # the locator so legRoot (and the hip child below it) would
-        # follow cont_thigh.  In leg_noRoot there is no separate
-        # legRoot joint; reparenting hip_j_def itself out of limbPlug
-        # broke knee_jDef's rotation chain (the previous alias had
-        # this exact effect).  Use a parentConstraint instead so hip
-        # stays as a child of limbPlug in the DAG and only inherits
-        # locator's transform via the constraint.
-        cmds.parentConstraint(
-            pacon_locator_hip, self.hip_j_def, maintainOffset=True
-        )
+        cmds.parent(self.leg_root_j_def, pacon_locator_hip)
         #
         cmds.connectAttr("%s.rigVis" % self.scaleGrp, "%s.v" % leg_start)
         cmds.connectAttr("%s.rigVis" % self.scaleGrp, "%s.v" % leg_end)
@@ -2428,7 +2438,7 @@ class LegNoRoot(ModuleCore):
         cmds.parentConstraint(
             self.cont_IK_foot.name, angle_ext_fixed_ik, maintainOffset=False
         )
-        functions.align_to_alter(angle_ext_float_ik, self.hip_j_def, 2)
+        functions.align_to_alter(angle_ext_float_ik, self.leg_root_j_def, 2)
         cmds.move(0, self.sideMult * 5, 0, angle_ext_float_ik, objectSpace=True)
 
         angle_node_ik = cmds.createNode(
@@ -2580,13 +2590,11 @@ class Guides(GuidesCore):
 
         # Define the offset vector (computed against the conceptual
         # root_vec position so the directional math stays identical
-        # to leg.py's behaviour, even though we don't draw a legRoot
-        # joint).
+        # to leg.py, even though we don't draw a legRoot guide).
         self.offsetVector = -((root_vec - hip_vec).normal())
 
         # Draw the joints & set orientation.  leg_noRoot starts the
-        # chain at hip -- no legRoot joint is created.  Ensure hip is
-        # a fresh top-level joint by clearing selection first.
+        # chain at hip -- no legRoot guide is created.
         cmds.select(clear=True)
         hip = cmds.joint(
             position=hip_vec,
@@ -2663,11 +2671,11 @@ class Guides(GuidesCore):
         ]
 
     def define_guides(self):
-        """Override the guide definition method.  Indices match
-        leg.py minus 1 because the LegRoot guide is gone.  The root
-        guide is tagged with a module-unique label
-        (``LegNoRootHip``) so identify() cannot confuse a regular
-        ``leg``'s second-position "Hip" guide for a leg_noRoot root."""
+        """Override the guide definition method.  Indices are leg.py
+        minus 1 because the LegRoot guide is gone.  The root guide
+        carries the module-unique label ``LegNoRootHip`` so
+        joint.identify cannot confuse a regular ``leg``'s
+        second-position "Hip" guide for a leg_noRoot root."""
         joint.set_joint_type(self.guideJoints[0], "LegNoRootHip")
         joint.set_joint_type(self.guideJoints[1], "Knee")
         joint.set_joint_type(self.guideJoints[2], "Foot")
