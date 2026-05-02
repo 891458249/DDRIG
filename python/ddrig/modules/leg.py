@@ -2150,6 +2150,59 @@ class Leg(ModuleCore):
             "%s.scaleSwitch" % ribbon_upper_leg.start_plug,
         )
 
+        # ---- hip_jDef driver: position fully follows up_start_j (the
+        # upper-leg ribbon's start control joint), rotation takes half.
+        # Same pattern as knee_halfRot (commit 814d020): pointConstraint
+        # for translate + pairBlend(weight=0.5, rotInterpolation=1) for
+        # rotate.  up_start_j is created inside Ribbon.create() under
+        # ``naming.parse([{name}, 'start'], suffix='j')`` where {name}
+        # for the upper-leg ribbon is ``naming.parse([module_name,
+        # 'up'])`` -- compose the same string here, guarded by
+        # cmds.objExists in case the ribbon implementation changes.
+        up_start_j = naming.parse(
+            [self.module_name, "up", "start"], suffix="j"
+        )
+        if cmds.objExists(up_start_j):
+            # Defensive: drop existing rotate / translate inputs first.
+            for _ch_attr in ("rotate", "translate"):
+                for _src in (cmds.listConnections(
+                        "%s.%s" % (self.hip_j_def, _ch_attr),
+                        source=True, destination=False, plugs=True) or []):
+                    try:
+                        cmds.disconnectAttr(
+                            _src, "%s.%s" % (self.hip_j_def, _ch_attr)
+                        )
+                    except RuntimeError:
+                        pass
+            try:
+                cmds.pointConstraint(
+                    up_start_j, self.hip_j_def, maintainOffset=False
+                )
+            except RuntimeError as _exc:
+                LOG.warning(
+                    "hip_jDef pointConstraint failed: %s" % _exc
+                )
+            hip_half_pb = cmds.createNode(
+                "pairBlend",
+                name=naming.parse(
+                    [self.module_name, "hip", "halfRot"], suffix="pb"
+                ),
+            )
+            cmds.connectAttr(
+                "%s.rotate" % up_start_j,
+                "%s.inRotate1" % hip_half_pb,
+            )
+            cmds.setAttr("%s.weight" % hip_half_pb, 0.5)
+            cmds.setAttr("%s.rotInterpolation" % hip_half_pb, 1)
+            cmds.connectAttr(
+                "%s.outRotate" % hip_half_pb,
+                "%s.rotate" % self.hip_j_def,
+            )
+        else:
+            LOG.warning(
+                "hip_jDef driver: %s does not exist; skipping" % up_start_j
+            )
+
         # LOWERLEG RIBBON
 
         ribbon_lower_leg = Ribbon(

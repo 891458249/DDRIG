@@ -1354,6 +1354,56 @@ class Arm(ModuleCore):
             "{0}.scaleSwitch".format(ribbon_upper_arm.start_plug),
         )
 
+        # ---- collarEnd_j driver: position fully follows up_start_j (the
+        # upper-arm ribbon's start control joint), rotation takes half.
+        # Symmetric with leg.py's hip_halfRot block.  up_start_j is
+        # created inside Ribbon.create() under
+        # ``naming.parse([{name}, 'start'], suffix='j')`` where {name}
+        # for the upper-arm ribbon is ``naming.parse([module_name,
+        # 'up'])``; compose the same string and guard with cmds.objExists.
+        up_start_j = naming.parse(
+            [self.module_name, "up", "start"], suffix="j"
+        )
+        if cmds.objExists(up_start_j):
+            for _ch_attr in ("rotate", "translate"):
+                for _src in (cmds.listConnections(
+                        "%s.%s" % (self.j_collar_end, _ch_attr),
+                        source=True, destination=False, plugs=True) or []):
+                    try:
+                        cmds.disconnectAttr(
+                            _src, "%s.%s" % (self.j_collar_end, _ch_attr)
+                        )
+                    except RuntimeError:
+                        pass
+            try:
+                cmds.pointConstraint(
+                    up_start_j, self.j_collar_end, maintainOffset=False
+                )
+            except RuntimeError as _exc:
+                LOG.warning(
+                    "collarEnd_j pointConstraint failed: %s" % _exc
+                )
+            collarEnd_half_pb = cmds.createNode(
+                "pairBlend",
+                name=naming.parse(
+                    [self.module_name, "collarEnd", "halfRot"], suffix="pb"
+                ),
+            )
+            cmds.connectAttr(
+                "%s.rotate" % up_start_j,
+                "%s.inRotate1" % collarEnd_half_pb,
+            )
+            cmds.setAttr("%s.weight" % collarEnd_half_pb, 0.5)
+            cmds.setAttr("%s.rotInterpolation" % collarEnd_half_pb, 1)
+            cmds.connectAttr(
+                "%s.outRotate" % collarEnd_half_pb,
+                "%s.rotate" % self.j_collar_end,
+            )
+        else:
+            LOG.warning(
+                "collarEnd_j driver: %s does not exist; skipping" % up_start_j
+            )
+
         # LOWER ARM RIBBON
 
         ribbon_lower_arm = Ribbon(
