@@ -83,6 +83,43 @@ LIMB_DATA = {
             "enum_list": "auto:U:V",
             "default_value": 0,
         },
+        # ---- Phase 2: nonLinear deformer counts ----
+        # Each adds a sine / wave / bend / twist nonLinear deformer to
+        # the ribbon surface; per-deformer attrs are exposed on the
+        # ``main`` controller (the first ctrl in self.ctrl_objects).
+        # Default 0 = no deformers built, Phase 1 behaviour preserved.
+        {
+            "attr_name": "sineCount",
+            "nice_name": "Sine_Count",
+            "attr_type": "long",
+            "min_value": 0,
+            "max_value": 5,
+            "default_value": 0,
+        },
+        {
+            "attr_name": "waveCount",
+            "nice_name": "Wave_Count",
+            "attr_type": "long",
+            "min_value": 0,
+            "max_value": 5,
+            "default_value": 0,
+        },
+        {
+            "attr_name": "bendCount",
+            "nice_name": "Bend_Count",
+            "attr_type": "long",
+            "min_value": 0,
+            "max_value": 5,
+            "default_value": 0,
+        },
+        {
+            "attr_name": "twistCount",
+            "nice_name": "Twist_Count",
+            "attr_type": "long",
+            "min_value": 0,
+            "max_value": 5,
+            "default_value": 0,
+        },
     ],
     "multi_guide": "Ribbon",
     "sided": True,
@@ -135,6 +172,13 @@ class Ribbon(ModuleCore):
         self.ctrl_size = float(cmds.getAttr("%s.ctrlSize" % self.inits[0]))
         # 0 = auto, 1 = U, 2 = V (matches the ``enum_list`` order).
         self.uv_dir = int(cmds.getAttr("%s.uvDirection" % self.inits[0]))
+        # Phase 2 deformer counts -- guarded by attributeQuery so an
+        # older guide (built before Phase 2) without these attrs falls
+        # back to 0 cleanly without crashing the build.
+        self.sine_count = self._read_count_attr("sineCount")
+        self.wave_count = self._read_count_attr("waveCount")
+        self.bend_count = self._read_count_attr("bendCount")
+        self.twist_count = self._read_count_attr("twistCount")
 
         # Standard DDRIG identity fields.
         self.side = joint.get_joint_side(self.inits[0])
@@ -162,8 +206,25 @@ class Ribbon(ModuleCore):
         self.ctrl_joints = []
         self.ctrl_follicles = []
         self.ctrl_objects = []
+        # Main controller used to host Phase 2 deformer attrs;
+        # populated at the end of ``_build_controllers`` from the
+        # first entry in ``self.ctrl_objects``.
+        self.main_ctrl = None
+        self.deformer_grp = None
 
     # -- helpers -------------------------------------------------------
+
+    def _read_count_attr(self, attr_name):
+        """Robustly read one of the Phase 2 ``*Count`` attrs off the
+        root guide, falling back to 0 if the attribute is missing
+        (older guide created before Phase 2 was added)."""
+        node = self.inits[0]
+        if not cmds.attributeQuery(attr_name, node=node, exists=True):
+            return 0
+        try:
+            return int(cmds.getAttr("%s.%s" % (node, attr_name)))
+        except (ValueError, RuntimeError):
+            return 0
 
     def _chain_length(self):
         """World-space arclength of the init chain.  Used to size the
@@ -476,6 +537,331 @@ class Ribbon(ModuleCore):
         except RuntimeError as exc:
             LOG.warning("ribbon: surface skinCluster failed: %s" % exc)
 
+        # The first controller hosts Phase 2 deformer attrs.  Choosing
+        # the root-side ctrl keeps the attrs visible at the obvious
+        # place when an animator picks the rig up from the root.
+        if self.ctrl_objects:
+            self.main_ctrl = self.ctrl_objects[0].name
+
+    # -- Phase 2: nonLinear deformers ---------------------------------
+
+    def _build_deformers(self):
+        """Add nonLinear deformers (sine / wave / bend / twist) to the
+        ribbon surface, with per-deformer attrs exposed on
+        :attr:`main_ctrl`.  Counts are read from the guide root's
+        ``sineCount`` / ``waveCount`` / ``bendCount`` / ``twistCount``
+        attrs.  When all four are 0 (default) this method is a no-op
+        and Phase 1 behaviour is preserved exactly.
+
+        Mirrors ``createDeformer`` from the user's
+        ``ribbon_rig_tool_freelancer3.2`` adapted to DDRIG containers
+        (deformer transforms parented under
+        ``{module}_deformer_grp -> nonScaleGrp``; main_ctrl drives the
+        deformer group via parent + scale constraint with
+        ``maintainOffset=True``)."""
+        total = (
+            self.sine_count + self.wave_count
+            + self.bend_count + self.twist_count
+        )
+        if total <= 0:
+            return
+        if not self.main_ctrl or not cmds.objExists(self.main_ctrl):
+            LOG.warning(
+                "ribbon: no main_ctrl available, skipping deformer creation"
+            )
+            return
+        if not self.surface or not cmds.objExists(self.surface):
+            LOG.warning(
+                "ribbon: surface missing, skipping deformer creation"
+            )
+            return
+
+        self.deformer_grp = cmds.group(
+            empty=True,
+            name=naming.parse(
+                [self.module_name, "deformer"], suffix="grp"
+            ),
+        )
+        cmds.parent(self.deformer_grp, self.nonScaleGrp)
+
+        for deform_type, count in (
+            ("sine", self.sine_count),
+            ("wave", self.wave_count),
+            ("bend", self.bend_count),
+            ("twist", self.twist_count),
+        ):
+            for idx in range(1, count + 1):
+                self._build_one_deformer(deform_type, idx)
+
+        # main_ctrl drives the whole deformer group with offset, so
+        # animators can move the rig root and the deformers come
+        # along.  ``maintainOffset=True`` records the rest pose
+        # offset; the constraint only follows main_ctrl's relative
+        # changes from there.
+        try:
+            cmds.parentConstraint(
+                self.main_ctrl, self.deformer_grp, maintainOffset=True
+            )
+            cmds.scaleConstraint(
+                self.main_ctrl, self.deformer_grp, maintainOffset=True
+            )
+        except RuntimeError as exc:
+            LOG.warning(
+                "ribbon: deformer_grp constraint failed: %s" % exc
+            )
+
+        self._restore_deformer_scale()
+
+    def _build_one_deformer(self, deform_type, idx):
+        """Create one nonLinear deformer of the given type, mirror its
+        attrs onto :attr:`main_ctrl`, connect ctrl -> deformer, aim
+        the deformer transform along the chain (skipped for ``wave``,
+        matching the source tool's behaviour), and parent it under
+        the deformer group."""
+        short = deform_type[0]
+        sn_idx = str(idx)
+
+        # Separator label on main_ctrl.
+        sep_attr = "%s_%s_deform" % (deform_type, sn_idx)
+        if not cmds.attributeQuery(sep_attr, node=self.main_ctrl, exists=True):
+            cmds.addAttr(
+                self.main_ctrl,
+                longName=sep_attr,
+                attributeType="enum",
+                enumName="------------:",
+                keyable=True,
+            )
+            cmds.setAttr(
+                "%s.%s" % (self.main_ctrl, sep_attr),
+                keyable=False, channelBox=True, lock=True,
+            )
+
+        # Envelope is universal across nonLinear deformers.
+        cmds.addAttr(
+            self.main_ctrl,
+            longName="%s_%s_envelope" % (deform_type, sn_idx),
+            shortName="%s%se" % (short, sn_idx),
+            attributeType="float",
+            keyable=True, defaultValue=0, minValue=0, maxValue=1,
+        )
+
+        # Type-specific attrs (mirrors source tool line 805-819).
+        if deform_type == "bend":
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_curvature" % (deform_type, sn_idx),
+                shortName="%s%sc" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-180, maxValue=180,
+            )
+        elif deform_type in ("sine", "wave"):
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_amplitude" % (deform_type, sn_idx),
+                shortName="%s%sa" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0.1,
+                minValue=-5, maxValue=5,
+            )
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_wavelength" % (deform_type, sn_idx),
+                shortName="%s%sw" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=2,
+                minValue=0.1, maxValue=10,
+            )
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_offset" % (deform_type, sn_idx),
+                shortName="%s%so" % (short, sn_idx),
+                attributeType="float", keyable=True,
+            )
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_dropoff" % (deform_type, sn_idx),
+                shortName="%s%sd" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-1, maxValue=1,
+            )
+        elif deform_type == "twist":
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_startAngle" % (deform_type, sn_idx),
+                shortName="%s%ssa" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-180, maxValue=180,
+            )
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_endAngle" % (deform_type, sn_idx),
+                shortName="%s%sea" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-180, maxValue=180,
+            )
+
+        # Wave gets an extra "dropoffPosition" channel.
+        if deform_type == "wave":
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_dropoffPosition" % (deform_type, sn_idx),
+                shortName="%s%sdp" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-1, maxValue=1,
+            )
+
+        # Twist / bend / sine all expose lowBound + highBound so
+        # animators can constrain the deformer's range along the
+        # ribbon's long axis.
+        if deform_type in ("twist", "bend", "sine"):
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_lowBound" % (deform_type, sn_idx),
+                shortName="%s%slb" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=0,
+                minValue=-10, maxValue=0,
+            )
+            cmds.addAttr(
+                self.main_ctrl,
+                longName="%s_%s_highBound" % (deform_type, sn_idx),
+                shortName="%s%shb" % (short, sn_idx),
+                attributeType="float",
+                keyable=True, defaultValue=2,
+                minValue=0, maxValue=10,
+            )
+
+        # Create the actual nonLinear deformer node.  cmds.nonLinear
+        # returns [deformer_node, deformer_handle_transform].  Rename
+        # both for readability + DDRIG naming conventions.
+        result = cmds.nonLinear(
+            self.surface,
+            type=deform_type,
+            name=naming.parse(
+                [self.module_name, deform_type, idx], suffix="def"
+            ),
+        )
+        deformer_node = result[0]
+        deformer_handle = result[1]
+        deformer_handle = cmds.rename(
+            deformer_handle,
+            naming.parse(
+                [self.module_name, deform_type, idx], suffix="handle"
+            ),
+        )
+
+        # Wire each ctrl attr we just added to the matching channel on
+        # the deformer node (envelope, amplitude, wavelength, ...).
+        ctrl_attrs = cmds.listAttr(
+            self.main_ctrl, keyable=True, userDefined=True
+        ) or []
+        prefix = "%s_%s" % (deform_type, sn_idx)
+        for attr in ctrl_attrs:
+            if not attr.startswith(prefix):
+                continue
+            node_attr = attr.split("_")[-1]
+            if not cmds.attributeQuery(
+                node_attr, node=deformer_node, exists=True
+            ):
+                continue
+            src = "%s.%s" % (self.main_ctrl, attr)
+            dst = "%s.%s" % (deformer_node, node_attr)
+            if not cmds.isConnected(src, dst):
+                try:
+                    cmds.connectAttr(src, dst, force=True)
+                except RuntimeError as exc:
+                    LOG.warning(
+                        "ribbon: connectAttr %s -> %s failed: %s"
+                        % (src, dst, exc)
+                    )
+
+        # Aim the deformer transform along the ribbon (skipped for
+        # ``wave`` -- source tool keeps wave aligned to its default
+        # orientation).  Aim target is the last bind follicle; we
+        # build a temp aim transform at that follicle's world
+        # transform, snap the handle onto main_ctrl's position, then
+        # aim the handle at the temp object and bake by deleting the
+        # constraint.
+        if deform_type != "wave" and self.bind_follicles:
+            aim_target = self.bind_follicles[-1]
+            try:
+                temp_aim = cmds.createNode(
+                    "transform",
+                    name=naming.parse(
+                        [self.module_name, deform_type, idx, "tempAim"],
+                        suffix="grp",
+                    ),
+                )
+                tmp_pc = cmds.parentConstraint(
+                    aim_target, temp_aim, maintainOffset=False
+                )
+                cmds.delete(tmp_pc)
+                cmds.matchTransform(
+                    deformer_handle, self.main_ctrl, position=True
+                )
+                tmp_ac = cmds.aimConstraint(
+                    temp_aim, deformer_handle,
+                    aimVector=[0, 1, 0],
+                    upVector=[1, 0, 0],
+                    worldUpType="vector",
+                    worldUpVector=[0, 1, 0],
+                    maintainOffset=False,
+                )
+                cmds.delete(tmp_ac)
+                cmds.delete(temp_aim)
+            except RuntimeError as exc:
+                LOG.warning(
+                    "ribbon: deformer aim setup failed for %s: %s"
+                    % (deformer_handle, exc)
+                )
+
+        cmds.parent(deformer_handle, self.deformer_grp)
+        cmds.select(clear=True)
+
+    def _restore_deformer_scale(self):
+        """Set every deformer transform's scale to half the bind chain
+        length.  The deformer's ``lowBound`` / ``highBound`` are
+        normalised to the deformer's local scale, so unless we scale
+        the handle to span the ribbon the deformer's effective range
+        is tiny relative to the actual surface.  Mirrors the source
+        tool's ``restoreDeformerScale``."""
+        if not self.deformer_grp:
+            return
+        if not self.bind_joints or len(self.bind_joints) < 2:
+            return
+        try:
+            p_first = cmds.xform(
+                self.bind_joints[0],
+                query=True, worldSpace=True, translation=True,
+            )
+            p_last = cmds.xform(
+                self.bind_joints[-1],
+                query=True, worldSpace=True, translation=True,
+            )
+        except RuntimeError:
+            return
+        distance = sum(
+            (a - b) ** 2 for a, b in zip(p_first, p_last)
+        ) ** 0.5
+        if distance <= 0:
+            return
+        scale_val = distance / 2.0
+        deformer_xforms = cmds.listRelatives(
+            self.deformer_grp, allDescendents=True, type="transform"
+        ) or []
+        for d in deformer_xforms:
+            for ax in ("sx", "sy", "sz"):
+                try:
+                    if cmds.getAttr("%s.%s" % (d, ax)) != scale_val:
+                        cmds.setAttr("%s.%s" % (d, ax), scale_val)
+                except RuntimeError:
+                    pass
+
     # -- pipeline ------------------------------------------------------
 
     def create_joints(self):
@@ -498,8 +884,15 @@ class Ribbon(ModuleCore):
     def create_controllers(self):
         """Second half of the build -- isolated so subclasses /
         Phase-2 deformer integrations can substitute their own
-        controller layout without re-running :meth:`create_joints`."""
+        controller layout without re-running :meth:`create_joints`.
+
+        The Phase 2 nonLinear-deformer step runs at the end of this
+        method because it depends on ``main_ctrl`` (set inside
+        ``_build_controllers``).  When all four deformer counts on
+        the guide root are 0 the step returns immediately and Phase 1
+        behaviour is preserved."""
         self._build_controllers()
+        self._build_deformers()
 
     def round_up(self):
         """Final wiring: scale-follow the rig root, hide rig-internal
